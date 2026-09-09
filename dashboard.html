@@ -1,74 +1,104 @@
 <!DOCTYPE html>
 <html lang="en">
+
 <head>
   <meta charset="UTF-8">
+  <base target="_top">
+  <!-- Vital for mobile rendering and scaling -->
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>ABBS Dashboard</title>
+  <title>ABBS Admin Portal</title>
+
+  <!-- Replaced Apps Script include with standard CSS link -->
+  <link rel="stylesheet" href="adminStyles.css">
 </head>
+
 <body>
 
-  <h1>ABBS Dashboard</h1>
+<!-- Mobile Header & Toggle -->
+<div class="mobile-header">
+  <span class="mobile-title">ABBS SIS</span>
+  <button class="menu-toggle" onclick="toggleMenu()">☰ Menu</button>
+</div>
 
-  <div class="cards">
+<div class="wrapper">
 
-    <div class="card">
-      <h3>Students</h3>
-      <h1 id="students">0</h1>
+    <!-- Sidebar / Mobile Navigation -->
+    <div class="sidebar" id="sidebar">
+
+        <h2>ABBS SIS</h2>
+
+        <ul>
+            <li onclick="loadPage('dashboard'); closeMenu()">🏠 Dashboard</li>
+            <li onclick="loadPage('students'); closeMenu()">👨‍🎓 Students</li>
+            <li onclick="loadPage('academicSessions'); closeMenu()">🗓 Academic Sessions</li>
+            <li onclick="loadPage('programmes'); closeMenu()">📚 Programmes</li>
+            <li onclick="loadPage('courses'); closeMenu()">📖 Courses</li>
+            <li onclick="loadPage('enrolments'); closeMenu()">📝 Enrolments</li>
+            <li onclick="loadPage('assessments'); closeMenu()">📊 Assessments</li>
+            <li onclick="loadPage('certificates'); closeMenu()">🎓 Certificates</li>
+            <li onclick="loadPage('reports'); closeMenu()">📈 Reports</li>
+            <li onclick="loadPage('settings'); closeMenu()">⚙️ Settings</li>
+        </ul>
+
     </div>
 
-    <div class="card">
-      <h3>Programmes</h3>
-      <h1 id="programmes">0</h1>
+    <!-- Main Content -->
+    <div class="content">
+
+        <div id="mainContent">
+            <!-- Dynamic page content loads here -->
+            <p>Loading...</p>
+        </div>
+
     </div>
 
-    <div class="card">
-      <h3>Courses</h3>
-      <h1 id="courses">0</h1>
-    </div>
+</div>
 
-    <div class="card">
-      <h3>Enrolments</h3>
-      <h1 id="enrolments">0</h1>
-    </div>
+<script>
+  function toggleMenu() {
+    var sidebar = document.getElementById('sidebar');
+    sidebar.classList.toggle('open');
+  }
 
-    <div class="card">
-      <h3>Certificates</h3>
-      <h1 id="certificates">0</h1>
-    </div>
-
-    <div class="card">
-      <h3>Pending Queue</h3>
-      <h1 id="pending">0</h1>
-    </div>
-
-  </div>
-
-  <script>
-    // Replace this URL with your deployed Apps Script Web App URL
-    const APPS_SCRIPT_URL = "YOUR_APPS_SCRIPT_WEB_APP_URL_HERE";
-
-    async function fetchDashboardMetrics() {
-      try {
-        const response = await fetch(APPS_SCRIPT_URL);
-        const data = await response.json();
-
-        // Update counts dynamically assuming your Apps Script returns matching key-value pairs
-        if (data) {
-          if (data.students !== undefined) document.getElementById('students').innerText = data.students;
-          if (data.programmes !== undefined) document.getElementById('programmes').innerText = data.programmes;
-          if (data.courses !== undefined) document.getElementById('courses').innerText = data.courses;
-          if (data.enrolments !== undefined) document.getElementById('enrolments').innerText = data.enrolments;
-          if (data.certificates !== undefined) document.getElementById('certificates').innerText = data.certificates;
-          if (data.pending !== undefined) document.getElementById('pending').innerText = data.pending;
-        }
-      } catch (error) {
-        console.error("Error fetching metrics from Google Sheets:", error);
-      }
+  function closeMenu() {
+    var sidebar = document.getElementById('sidebar');
+    if (window.innerWidth <= 768) {
+      sidebar.classList.remove('open');
     }
+  }
 
-    // Load data when page mounts
-    window.addEventListener('DOMContentLoaded', fetchDashboardMetrics);
-  </script>
+  // Dynamic page loader replacing Apps Script HTML includes
+  async function loadPage(pageName) {
+    const mainContent = document.getElementById('mainContent');
+    
+    // Capitalize first letter to match Dashboard.html naming
+    const fileName = pageName.charAt(0).toUpperCase() + pageName.slice(1) + '.html';
+
+    try {
+      const response = await fetch(fileName);
+      if (!response.ok) throw new Error(`HTTP error! status: ${response.status}`);
+      const html = await response.text();
+      mainContent.innerHTML = html;
+
+      // Automatically trigger metric fetch if loading the Dashboard view
+      if (pageName === 'dashboard' && typeof fetchDashboardMetrics === 'function') {
+        fetchDashboardMetrics();
+      }
+    } catch (error) {
+      mainContent.innerHTML = `<h3>Error loading page: ${pageName}</h3><p>Make sure ${fileName} exists in your repository.</p>`;
+      console.error('Page load error:', error);
+    }
+  }
+
+  // Load dashboard view by default when DOM loads
+  window.addEventListener('DOMContentLoaded', () => {
+    loadPage('dashboard');
+  });
+</script>
+
+<!-- Replaced Apps Script include with standard JS script tag -->
+<script src="adminScripts.js"></script>
 
 </body>
+
 </html>
