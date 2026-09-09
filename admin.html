@@ -78,7 +78,7 @@
       const response = await fetch(fileName);
       if (!response.ok) throw new Error(`HTTP error! status: ${response.status}`);
       const html = await response.text();
-      mainContent.innerHTML = html;
+      mainContent.innerHTML = js;
 
       // Automatically trigger metric fetch if loading the Dashboard view
       if (pageName === 'dashboard' && typeof fetchDashboardMetrics === 'function') {
