@@ -1,0 +1,74 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>ABBS Dashboard</title>
+</head>
+<body>
+
+  <h1>ABBS Dashboard</h1>
+
+  <div class="cards">
+
+    <div class="card">
+      <h3>Students</h3>
+      <h1 id="students">0</h1>
+    </div>
+
+    <div class="card">
+      <h3>Programmes</h3>
+      <h1 id="programmes">0</h1>
+    </div>
+
+    <div class="card">
+      <h3>Courses</h3>
+      <h1 id="courses">0</h1>
+    </div>
+
+    <div class="card">
+      <h3>Enrolments</h3>
+      <h1 id="enrolments">0</h1>
+    </div>
+
+    <div class="card">
+      <h3>Certificates</h3>
+      <h1 id="certificates">0</h1>
+    </div>
+
+    <div class="card">
+      <h3>Pending Queue</h3>
+      <h1 id="pending">0</h1>
+    </div>
+
+  </div>
+
+  <script>
+    // Replace this URL with your deployed Apps Script Web App URL
+    const APPS_SCRIPT_URL = "https://script.google.com/macros/s/AKfycbxYgEHZzmGLc8rXccYsk27nTC22cbAI6Q2MOjxqBRe3RnbSszgyAYBe9QFZvwLDpkWg/exec";
+
+    async function fetchDashboardMetrics() {
+      try {
+        const response = await fetch(APPS_SCRIPT_URL);
+        const data = await response.json();
+
+        // Update counts dynamically assuming your Apps Script returns matching key-value pairs
+        if (data) {
+          if (data.students !== undefined) document.getElementById('students').innerText = data.students;
+          if (data.programmes !== undefined) document.getElementById('programmes').innerText = data.programmes;
+          if (data.courses !== undefined) document.getElementById('courses').innerText = data.courses;
+          if (data.enrolments !== undefined) document.getElementById('enrolments').innerText = data.enrolments;
+          if (data.certificates !== undefined) document.getElementById('certificates').innerText = data.certificates;
+          if (data.pending !== undefined) document.getElementById('pending').innerText = data.pending;
+        }
+      } catch (error) {
+        console.error("Error fetching metrics from Google Sheets:", error);
+      }
+    }
+
+    // Load data when page mounts
+    window.addEventListener('DOMContentLoaded', fetchDashboardMetrics);
+  </script>
+
+</body>
+</html>
