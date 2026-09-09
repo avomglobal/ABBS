@@ -1,15 +1,13 @@
 <!DOCTYPE html>
-<html lang="en">
+<html>
 
 <head>
-  <meta charset="UTF-8">
   <base target="_top">
   <!-- Vital for mobile rendering and scaling -->
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>ABBS Admin Portal</title>
 
-  <!-- Replaced Apps Script include with standard CSS link -->
-  <link rel="stylesheet" href="adminStyles.css">
+  <?!= include("adminStyles"); ?>
 </head>
 
 <body>
@@ -46,8 +44,9 @@
     <div class="content">
 
         <div id="mainContent">
-            <!-- Dynamic page content loads here -->
-            <p>Loading...</p>
+
+            <?!= include("dashboard"); ?>
+
         </div>
 
     </div>
@@ -66,39 +65,11 @@
       sidebar.classList.remove('open');
     }
   }
-
-  // Dynamic page loader replacing Apps Script HTML includes
-  async function loadPage(pageName) {
-    const mainContent = document.getElementById('mainContent');
-    
-    // Capitalize first letter to match Dashboard.html naming
-    const fileName = pageName.charAt(0).toUpperCase() + pageName.slice(1) + '.html';
-
-    try {
-      const response = await fetch(fileName);
-      if (!response.ok) throw new Error(`HTTP error! status: ${response.status}`);
-      const html = await response.text();
-      mainContent.innerHTML = html;
-
-      // Automatically trigger metric fetch if loading the Dashboard view
-      if (pageName === 'dashboard' && typeof fetchDashboardMetrics === 'function') {
-        fetchDashboardMetrics();
-      }
-    } catch (error) {
-      mainContent.innerHTML = `<h3>Error loading page: ${pageName}</h3><p>Make sure ${fileName} exists in your repository.</p>`;
-      console.error('Page load error:', error);
-    }
-  }
-
-  // Load dashboard view by default when DOM loads
-  window.addEventListener('DOMContentLoaded', () => {
-    loadPage('dashboard');
-  });
 </script>
 
-<!-- Replaced Apps Script include with standard JS script tag -->
-<script src="adminScripts.js"></script>
+<?!= include("adminScripts"); ?>
 
 </body>
 
 </html>
+
