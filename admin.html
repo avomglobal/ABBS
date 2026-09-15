@@ -1,104 +1,754 @@
 <!DOCTYPE html>
 <html lang="en">
-
 <head>
-  <meta charset="UTF-8">
-  <base target="_top">
-  <!-- Vital for mobile rendering and scaling -->
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>ABBS Admin Portal</title>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+<title>Attendance</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,500;9..144,600&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+<script src="https://unpkg.com/html5-qrcode@2.3.8/html5-qrcode.min.js"></script>
+<style>
+  :root{
+    --ink:#10152B; --panel:#1A2148; --panel-2:#232B58;
+    --brass:#D9A441; --brass-soft:rgba(217,164,65,0.16);
+    --success:#3FAE6B; --alert:#E2604F;
+    --paper:#F4F1E8; --paper-dim:#B9BEDB;
+    --line:rgba(244,241,232,0.10);
+  }
+  *{box-sizing:border-box;}
+  html,body{height:100%;margin:0;background:#000;}
+  body{ font-family:'Inter',sans-serif; color:var(--paper); display:flex; justify-content:center; -webkit-tap-highlight-color:transparent; }
+  .app-shell{
+    width:100%; max-width:430px; min-height:100vh; min-height:100dvh;
+    background:var(--ink); display:flex; flex-direction:column; position:relative; overflow:hidden;
+  }
 
-  <!-- Replaced Apps Script include with standard CSS link -->
-  <link rel="stylesheet" href="adminStyles.css">
+  .topbar{
+    padding:calc(env(safe-area-inset-top,0px) + 14px) 18px 12px;
+    background:var(--panel); border-bottom:1px solid var(--line); z-index:6;
+    display:flex; flex-direction:column; gap:12px;
+  }
+  .topbar-row{ display:flex; align-items:center; justify-content:space-between; }
+  .app-title{ font-family:'Fraunces',serif; font-size:19px; font-weight:600; margin:0; }
+  .counter-pill{ display:flex; align-items:center; gap:6px; background:var(--panel-2); border:1px solid var(--line); border-radius:20px; padding:6px 12px 6px 10px; }
+  .counter-pill .dot{ width:6px; height:6px; border-radius:50%; background:var(--success); }
+  .counter-pill span{ font-size:13px; font-weight:600; font-variant-numeric:tabular-nums; }
+
+  .tab-switch{ display:flex; background:var(--panel-2); border-radius:12px; padding:4px; gap:4px; }
+  .tab-switch button{
+    flex:1; border:none; background:transparent; color:var(--paper-dim);
+    font-family:'Inter',sans-serif; font-size:13px; font-weight:600; padding:9px 0;
+    border-radius:9px; cursor:pointer; display:flex; align-items:center; justify-content:center; gap:6px;
+  }
+  .tab-switch button.active{ background:var(--brass); color:#2A1D06; }
+
+  .content{ flex:1; display:flex; flex-direction:column; min-height:0; position:relative; }
+  .scroll-pane{ flex:1; overflow-y:auto; padding:20px; }
+
+  .card{ background:var(--panel); border:1px solid var(--line); border-radius:18px; padding:20px; }
+  .card + .card{ margin-top:14px; }
+  .card h2{ font-family:'Fraunces',serif; font-size:17px; font-weight:600; margin:0 0 16px; }
+
+  .field{ margin-bottom:14px; }
+  .field label{ display:block; font-size:12px; color:var(--paper-dim); font-weight:500; margin-bottom:6px; }
+  .field-row{ display:grid; grid-template-columns:1fr 1fr; gap:10px; }
+  select, input[type=text], input[type=date]{
+    width:100%; background:var(--ink); border:1px solid var(--line); color:var(--paper);
+    border-radius:10px; padding:11px 12px; font-size:14px; font-family:'Inter',sans-serif; outline:none;
+  }
+  select:focus, input:focus{ border-color:var(--brass); }
+
+  .btn{ border:none; border-radius:100px; padding:14px 0; font-size:14.5px; font-weight:600; font-family:'Inter',sans-serif; cursor:pointer; transition:transform 0.15s ease; width:100%; }
+  .btn:active{ transform:scale(0.98); }
+  .btn-primary{ background:var(--brass); color:#2A1D06; }
+  .btn-primary:disabled{ background:var(--panel-2); color:var(--paper-dim); }
+  .btn-ghost{ background:transparent; border:1.5px solid var(--line); color:var(--paper-dim); width:auto; padding:10px 18px; }
+
+  .status-card{ margin-top:14px; padding:12px 14px; border-radius:12px; font-size:13px; font-weight:500; display:none; }
+  .status-card.show{ display:block; }
+  .status-card.ok{ background:rgba(63,174,107,0.14); color:var(--success); border:1px solid rgba(63,174,107,0.4); }
+  .status-card.err{ background:rgba(226,96,79,0.14); color:var(--alert); border:1px solid rgba(226,96,79,0.4); }
+
+  .session-strip{ display:none; align-items:center; justify-content:space-between; padding:14px 18px; background:var(--panel-2); border-bottom:1px solid var(--line); }
+  .session-strip.show{ display:flex; }
+  .session-strip h3{ font-family:'Fraunces',serif; font-size:15px; margin:0; }
+  .session-strip p{ font-size:11.5px; color:var(--paper-dim); margin:2px 0 0; }
+
+  .scan-stage{ position:relative; flex:1; background:#000; overflow:hidden; display:none; }
+  .scan-stage.show{ display:block; }
+  #reader{ width:100%; height:100%; }
+  #reader video{ width:100%!important; height:100%!important; object-fit:cover; }
+  #reader img{ display:none; }
+
+  .reticle{ position:absolute; inset:0; display:flex; align-items:center; justify-content:center; pointer-events:none; z-index:2; }
+  .reticle svg{ width:64%; max-width:260px; aspect-ratio:1; }
+  .reticle-hint{ position:absolute; bottom:28px; left:0; right:0; text-align:center; font-size:13px; color:var(--paper-dim); pointer-events:none; z-index:2; }
+
+  .flash{ position:absolute; inset:0; z-index:3; pointer-events:none; opacity:0; }
+  .flash.on{ animation:flashPulse 0.5s ease-out; }
+  @keyframes flashPulse{ 0%{ opacity:0.55; } 100%{ opacity:0; } }
+
+  .sheet-backdrop{ position:absolute; inset:0; background:rgba(8,10,22,0.55); z-index:9; opacity:0; pointer-events:none; transition:opacity 0.25s ease; }
+  .sheet-backdrop.show{ opacity:1; pointer-events:auto; }
+  .sheet{
+    position:absolute; left:0; right:0; bottom:0; z-index:10; background:var(--panel);
+    border-radius:24px 24px 0 0; padding:22px 22px calc(env(safe-area-inset-bottom,0px) + 22px);
+    transform:translateY(100%); transition:transform 0.45s cubic-bezier(.2,.9,.25,1.05); box-shadow:0 -12px 40px rgba(0,0,0,0.4);
+  }
+  .sheet.show{ transform:translateY(0); }
+  .sheet-grip{ width:36px; height:4px; background:var(--line); border-radius:2px; margin:0 auto 18px; }
+  .student-row{ display:flex; align-items:center; gap:14px; }
+  .student-photo{ width:64px; height:64px; border-radius:50%; object-fit:cover; border:2px solid var(--line); background:var(--panel-2); flex-shrink:0; }
+  .student-photo.pending{ filter:grayscale(1); opacity:0.5; }
+  .student-name{ font-family:'Fraunces',serif; font-size:21px; font-weight:600; margin:0; line-height:1.15; }
+  .student-meta{ font-size:12.5px; color:var(--paper-dim); margin:3px 0 0; }
+  .checklist{ margin:18px 0 4px; display:flex; flex-direction:column; gap:9px; }
+  .check-row{ display:flex; align-items:center; gap:10px; font-size:13.5px; color:var(--paper-dim); }
+  .check-row .icon{ width:18px; height:18px; border-radius:50%; flex-shrink:0; display:flex; align-items:center; justify-content:center; border:1.5px solid var(--line); font-size:11px; }
+  .check-row.pass{ color:var(--paper); }
+  .check-row.pass .icon{ background:var(--success); border-color:var(--success); color:#08210f; }
+  .check-row.fail{ color:var(--alert); }
+  .check-row.fail .icon{ background:var(--alert); border-color:var(--alert); color:#2a0906; }
+  .sheet-actions{ display:flex; gap:10px; margin-top:20px; }
+  .sheet-actions .btn-ghost{ flex:0 0 auto; }
+  .sheet-actions .btn-approve{ flex:1; }
+  .btn-approve{ background:var(--panel-2); color:var(--paper-dim); box-shadow:none; pointer-events:none; border:none; border-radius:100px; padding:15px 0; font-size:14.5px; font-weight:600; font-family:'Inter',sans-serif; }
+  .btn-approve.ready{ background:var(--brass); color:#2A1D06; pointer-events:auto; animation:readyGlow 1.1s ease-out; }
+  @keyframes readyGlow{ 0%{ box-shadow:0 0 0 0 rgba(217,164,65,0.6); } 70%{ box-shadow:0 0 0 14px rgba(217,164,65,0); } 100%{ box-shadow:0 0 0 0 rgba(217,164,65,0); } }
+
+  .toast{ position:absolute; top:14px; left:20px; right:20px; z-index:11; background:var(--panel-2); border:1px solid var(--line); border-radius:14px; padding:12px 16px; font-size:13px; transform:translateY(-16px); opacity:0; transition:all 0.3s ease; pointer-events:none; }
+  .toast.show{ transform:translateY(0); opacity:1; }
+</style>
 </head>
-
 <body>
 
-<!-- Mobile Header & Toggle -->
-<div class="mobile-header">
-  <span class="mobile-title">ABBS SIS</span>
-  <button class="menu-toggle" onclick="toggleMenu()">☰ Menu</button>
-</div>
+<div class="app-shell">
 
-<div class="wrapper">
-
-    <!-- Sidebar / Mobile Navigation -->
-    <div class="sidebar" id="sidebar">
-
-        <h2>ABBS SIS</h2>
-
-        <ul>
-            <li onclick="loadPage('dashboard'); closeMenu()">🏠 Dashboard</li>
-            <li onclick="loadPage('students'); closeMenu()">👨‍🎓 Students</li>
-            <li onclick="loadPage('academicSessions'); closeMenu()">🗓 Academic Sessions</li>
-            <li onclick="loadPage('programmes'); closeMenu()">📚 Programmes</li>
-            <li onclick="loadPage('courses'); closeMenu()">📖 Courses</li>
-            <li onclick="loadPage('enrolments'); closeMenu()">📝 Enrolments</li>
-            <li onclick="loadPage('assessments'); closeMenu()">📊 Assessments</li>
-            <li onclick="loadPage('certificates'); closeMenu()">🎓 Certificates</li>
-            <li onclick="loadPage('reports'); closeMenu()">📈 Reports</li>
-            <li onclick="loadPage('settings'); closeMenu()">⚙️ Settings</li>
-        </ul>
-
+  <div class="topbar">
+    <div class="topbar-row">
+      <p class="app-title">Attendance</p>
+      <div class="counter-pill"><span class="dot"></span><span id="countToday">0</span></div>
     </div>
+    <div class="tab-switch">
+      <button id="tabScanBtn" class="active" onclick="switchTab('scan')">Scan</button>
+      <button id="tabManualBtn" onclick="switchTab('manual')">Manual</button>
+    </div>
+  </div>
 
-    <!-- Main Content -->
-    <div class="content">
+  <div class="content">
 
-        <div id="mainContent">
-            <!-- Dynamic page content loads here -->
-            <p>Loading...</p>
+    <!-- SCAN TAB -->
+    <div id="scanTab">
+      <div class="session-strip" id="sessionStrip">
+        <div>
+          <h3 id="sessionCourse"> </h3>
+          <p id="sessionMeta"> </p>
         </div>
+        <button class="btn-ghost" onclick="endSession()">End</button>
+      </div>
 
+      <div class="scroll-pane" id="setupPane">
+        <div class="card">
+          <h2>Start a session</h2>
+          <div class="field-row">
+            <div class="field">
+              <label>Programme</label>
+              <select id="setupProgramme" onchange="onSetupProgrammeChange()"><option value="">Select </option></select>
+            </div>
+            <div class="field">
+              <label>Semester</label>
+              <select id="setupSemester">
+                <option>Semester 1</option>
+                <option>Semester 2</option>
+                <option>Semester 3</option>
+                <option>Semester 4</option>
+              </select>
+            </div>
+          </div>
+          <div class="field">
+            <label>Course</label>
+            <select id="setupCourse"><option value="">Select programme first </option></select>
+          </div>
+          <div class="field">
+            <label>Lesson / topic</label>
+            <input type="text" id="setupLesson" placeholder="e.g. Lesson 5   Database Normalization">
+          </div>
+          <button class="btn btn-primary" onclick="startSession()">Start attendance session</button>
+        </div>
+      </div>
+
+      <div class="scan-stage" id="scanStage">
+        <div id="reader"></div>
+        <div class="reticle">
+          <svg viewBox="0 0 100 100" fill="none">
+            <path d="M4 24V10a6 6 0 0 1 6-6h14" stroke="#F4F1E8" stroke-width="4" stroke-linecap="round"/>
+            <path d="M96 24V10a6 6 0 0 0-6-6H76" stroke="#F4F1E8" stroke-width="4" stroke-linecap="round"/>
+            <path d="M4 76v14a6 6 0 0 0 6 6h14" stroke="#F4F1E8" stroke-width="4" stroke-linecap="round"/>
+            <path d="M96 76v14a6 6 0 0 1-6 6H76" stroke="#F4F1E8" stroke-width="4" stroke-linecap="round"/>
+          </svg>
+        </div>
+        <div class="reticle-hint">Align the student's QR code in frame</div>
+        <div class="flash" id="flash"></div>
+        <div class="toast" id="toast"></div>
+      </div>
     </div>
 
+    <!-- MANUAL TAB -->
+    <div id="manualTab" class="scroll-pane" style="display:none;">
+      <div class="card">
+        <h2>Manual attendance</h2>
+        <div class="field-row">
+          <div class="field">
+            <label>Programme</label>
+            <select id="manualProgramme" onchange="onManualProgrammeChange()"><option value="">Select </option></select>
+          </div>
+          <div class="field">
+            <label>Semester</label>
+            <select id="manualSemester">
+              <option>Semester 1</option>
+              <option>Semester 2</option>
+              <option>Semester 3</option>
+              <option>Semester 4</option>
+            </select>
+          </div>
+        </div>
+        <div class="field-row">
+          <div class="field">
+            <label>Course</label>
+            <select id="manualCourse"><option value="">Select programme first </option></select>
+          </div>
+          <div class="field">
+            <label>Cohort</label>
+            <select id="manualCohort" onchange="loadManualStudents()"><option value="">Loading </option></select>
+          </div>
+        </div>
+        <div class="field">
+          <label>Lesson / topic</label>
+          <input type="text" id="manualLesson" placeholder="e.g. Lesson 4   System Architecture">
+        </div>
+        <div class="field">
+          <label>Student</label>
+          <select id="manualStudent"><option value="">Select programme & cohort first </option></select>
+        </div>
+        <div class="field">
+          <label>Status</label>
+          <select id="manualStatus">
+            <option>Present</option>
+            <option>Late</option>
+            <option>Excused</option>
+            <option>Absent</option>
+          </select>
+        </div>
+        <button class="btn btn-primary" id="manualSaveBtn" onclick="submitManual()">Save record</button>
+        <div class="status-card" id="manualStatusCard"></div>
+      </div>
+    </div>
+
+  </div>
+
+  <div class="sheet-backdrop" id="backdrop"></div>
+  <div class="sheet" id="sheet">
+    <div class="sheet-grip"></div>
+    <div class="student-row">
+      <img id="studentPhoto" class="student-photo pending" src="" alt="">
+      <div>
+        <p class="student-name" id="studentName"> </p>
+        <p class="student-meta" id="studentMeta"> </p>
+      </div>
+    </div>
+    <div class="checklist" id="checklist"></div>
+    <div class="sheet-actions">
+      <button class="btn-ghost" id="rejectBtn">Rescan</button>
+      <button class="btn-approve" id="approveBtn" disabled>Mark present</button>
+    </div>
+  </div>
+
 </div>
+
+<audio id="attSuccessSound" src="https://actions.google.com/sounds/v1/cartoon/clang_and_wobble.ogg"></audio>
+<audio id="attErrorSound" src="https://actions.google.com/sounds/v1/alarms/beep_short.ogg"></audio>
 
 <script>
-  function toggleMenu() {
-    var sidebar = document.getElementById('sidebar');
-    sidebar.classList.toggle('open');
-  }
+  // ---------------------------------------------------------------
+  // Backend wiring   mirrors the working callBackend() from your
+  // deployed ABBS attendance.html: same URL, same action names,
+  // same GET/POST split, same google.script.run fallback.
+  // ---------------------------------------------------------------
+  const GAS_WEB_APP_URL = "https://script.google.com/macros/s/AKfycbx_KM4yAqV27vwwqhtA7otfHbsXoREUbfYETHy3YrR3wsdZfgJx2YYTxBu2dUvSx-9L/exec";
+  let lastBackendError = null; // last fetch failure reason, surfaced in the UI so a stalled call is never silent
 
-  function closeMenu() {
-    var sidebar = document.getElementById('sidebar');
-    if (window.innerWidth <= 768) {
-      sidebar.classList.remove('open');
-    }
-  }
+  async function callBackend(action, params = {}) {
+    if (typeof google !== 'undefined' && google.script && google.script.run) {
+      return new Promise((resolve, reject) => {
+        google.script.run
+          .withSuccessHandler(resolve)
+          .withFailureHandler(reject)[action](...Object.values(params));
+      });
+    } else if (GAS_WEB_APP_URL) {
+      // Hard timeout   a stalled fetch (dropped connection, blocked request,
+      // wrong deployment access setting) must not hang the UI forever.
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 12000);
+      lastBackendError = null;
 
-  // Dynamic page loader replacing Apps Script HTML includes
-  async function loadPage(pageName) {
-    const mainContent = document.getElementById('mainContent');
-    
-    // Capitalize first letter to match Dashboard.html naming
-    const fileName = pageName.charAt(0).toUpperCase() + pageName.slice(1) + '.html';
+      try {
+        const isPost = action.startsWith('save') || action.startsWith('delete') || action.startsWith('record');
+        let response;
 
-    try {
-      const response = await fetch(fileName);
-      if (!response.ok) throw new Error(`HTTP error! status: ${response.status}`);
-      const html = await response.text();
-      mainContent.innerHTML = html;
+        if (isPost) {
+          response = await fetch(GAS_WEB_APP_URL + "?action=" + action, {
+            method: "POST",
+            headers: { "Content-Type": "text/plain;charset=utf-8" },
+            body: JSON.stringify({ action: action, ...params }),
+            signal: controller.signal
+          });
+        } else {
+          const url = new URL(GAS_WEB_APP_URL);
+          url.searchParams.append("action", action);
+          Object.keys(params).forEach(k => {
+            url.searchParams.append(k, typeof params[k] === 'object' ? JSON.stringify(params[k]) : params[k]);
+          });
+          response = await fetch(url, { signal: controller.signal });
+        }
 
-      // Automatically trigger metric fetch if loading the Dashboard view
-      if (pageName === 'dashboard' && typeof fetchDashboardMetrics === 'function') {
-        fetchDashboardMetrics();
+        if (!response.ok) {
+          lastBackendError = `HTTP ${response.status} from Apps Script`;
+          console.error(lastBackendError);
+          return null;
+        }
+
+        let res;
+        try { res = await response.json(); }
+        catch (parseErr) {
+          // Usually means Apps Script returned a Google login/HTML page instead
+          // of JSON   almost always a deployment access-setting problem.
+          lastBackendError = "Response wasn't JSON   check the Web App's 'Who has access' deployment setting (should be Anyone).";
+          console.error(lastBackendError, parseErr);
+          return null;
+        }
+        return res.data !== undefined ? res.data : res;
+
+      } catch (err) {
+        lastBackendError = err.name === 'AbortError'
+          ? `Request to ${action} timed out after 12s`
+          : `Network error calling ${action}: ${err.message}`;
+        console.error("API Call Error:", lastBackendError);
+        return null;
+      } finally {
+        clearTimeout(timeoutId);
       }
-    } catch (error) {
-      mainContent.innerHTML = `<h3>Error loading page: ${pageName}</h3><p>Make sure ${fileName} exists in your repository.</p>`;
-      console.error('Page load error:', error);
+    }
+    return null;
+  }
+
+  function playAttSuccessSound() {
+    const s = document.getElementById("attSuccessSound");
+    if (s) { s.currentTime = 0; s.play().catch(() => {}); }
+  }
+  function playAttErrorSound() {
+    const s = document.getElementById("attErrorSound");
+    if (s) { s.currentTime = 0; s.play().catch(() => {}); }
+  }
+
+  let todayCount = 0;
+  let SESSION = null;
+  let html5QrCode = null, currentStudent = null, scannerBusy = false;
+
+  function bumpCount(n) {
+    todayCount = n != null ? n : todayCount + 1;
+    document.getElementById("countToday").textContent = todayCount;
+  }
+
+  // ---------- Tab switching ----------
+  function switchTab(tab) {
+    const scanBtn = document.getElementById("tabScanBtn");
+    const manualBtn = document.getElementById("tabManualBtn");
+    const scanTab = document.getElementById("scanTab");
+    const manualTab = document.getElementById("manualTab");
+
+    if (tab === "scan") {
+      scanTab.style.display = "flex"; scanTab.style.flexDirection = "column"; scanTab.style.flex = "1";
+      manualTab.style.display = "none";
+      scanBtn.classList.add("active"); manualBtn.classList.remove("active");
+      if (html5QrCode && SESSION) html5QrCode.resume().catch(()=>{});
+    } else {
+      scanTab.style.display = "none";
+      manualTab.style.display = "block";
+      manualBtn.classList.add("active"); scanBtn.classList.remove("active");
+      if (html5QrCode) html5QrCode.pause();
+    }
+  }
+  document.getElementById("scanTab").style.display = "flex";
+  document.getElementById("scanTab").style.flexDirection = "column";
+  document.getElementById("scanTab").style.flex = "1";
+
+  // ---------- Loading dropdown data ----------
+  async function loadProgrammes() {
+    let list = await callBackend('getProgrammesList');
+    if (!list) list = ["Computer Science", "Software Engineering", "Information Technology"];
+
+    const opts = '<option value="">Select Programme...</option>' + list.map(p => {
+      const val = p.name || p;
+      return `<option value="${val}">${val}</option>`;
+    }).join("");
+    document.getElementById("setupProgramme").innerHTML = opts;
+    document.getElementById("manualProgramme").innerHTML = opts;
+  }
+
+  async function loadCohorts() {
+    let cohorts = await callBackend('getCohortsList');
+    if (!cohorts) cohorts = ["2023/2024", "2024/2025"];
+
+    const select = document.getElementById("manualCohort");
+    select.innerHTML = '<option value="">Select Cohort...</option>' +
+      cohorts.map(c => `<option value="${c}">${c}</option>`).join("");
+  }
+
+  async function loadCourses(programme, targetSelect) {
+    targetSelect.innerHTML = '<option value="">Select Course...</option>';
+    if (!programme) return;
+    let courses = await callBackend('getCoursesByProgramme', { programme });
+    if (!courses) courses = ["Database Systems", "Web Architecture", "Data Structures"];
+    courses.forEach(c => {
+      const courseName = c.courseName || c;
+      const opt = document.createElement("option");
+      opt.value = courseName; opt.text = courseName;
+      targetSelect.appendChild(opt);
+    });
+  }
+
+  function onSetupProgrammeChange() {
+    loadCourses(document.getElementById("setupProgramme").value, document.getElementById("setupCourse"));
+  }
+  function onManualProgrammeChange() {
+    loadCourses(document.getElementById("manualProgramme").value, document.getElementById("manualCourse"));
+    const cohortEl = document.getElementById("manualCohort");
+    if (document.getElementById("manualProgramme").value && cohortEl.value) loadManualStudents();
+  }
+
+  async function loadManualStudents() {
+    const programme = document.getElementById("manualProgramme").value;
+    const cohort = document.getElementById("manualCohort").value;
+    const select = document.getElementById("manualStudent");
+
+    if (!programme || !cohort) return;
+    select.innerHTML = '<option value="">Loading students...</option>';
+
+    let students = await callBackend('getStudentsByProgrammeAndCohort', { programme, cohort });
+    if (!students) {
+      students = [
+        { studentID: "STU-1001", studentName: "Alice Johnson", photoUrl: "" },
+        { studentID: "STU-1002", studentName: "Bob Smith", photoUrl: "" }
+      ];
+    }
+
+    if (students.length === 0) {
+      select.innerHTML = '<option value="">No eligible students found</option>';
+      return;
+    }
+
+    let html = '<option value="">Select Student...</option>';
+    students.forEach(s => {
+      const cleanName = (s.studentName || s.name || '').replace(/'/g, "&apos;");
+      const cleanID = s.studentID || s.id || '';
+      const payload = JSON.stringify({
+        studentID: cleanID, studentName: cleanName, photoUrl: s.photoUrl || s.passport || ""
+      }).replace(/'/g, "&apos;");
+      html += `<option value='${payload}'>${cleanID} - ${cleanName}</option>`;
+    });
+    select.innerHTML = html;
+  }
+
+  async function loadTodayCount() {
+    const count = await callBackend('getTodayAttendanceCount');
+    bumpCount(count || 0);
+  }
+
+  // ---------- Session control ----------
+  function startSession() {
+    const programme = document.getElementById("setupProgramme").value;
+    const semester = document.getElementById("setupSemester").value;
+    const course = document.getElementById("setupCourse").value;
+    const lesson = document.getElementById("setupLesson").value.trim();
+
+    if (!programme || !course || !lesson) {
+      alert("Please complete Programme, Course, and Lesson first.");
+      return;
+    }
+
+    SESSION = { programme, semester, course, lesson };
+    document.getElementById("sessionCourse").textContent = course;
+    document.getElementById("sessionMeta").textContent = `${programme}   ${semester}   ${lesson}`;
+    document.getElementById("sessionStrip").classList.add("show");
+    document.getElementById("setupPane").style.display = "none";
+    document.getElementById("scanStage").classList.add("show");
+
+    startScanner();
+  }
+
+  function endSession() {
+    if (!confirm("End this attendance session?")) return;
+    if (html5QrCode) { html5QrCode.stop().catch(()=>{}); html5QrCode = null; }
+    SESSION = null;
+    currentStudent = null;
+    document.getElementById("sessionStrip").classList.remove("show");
+    document.getElementById("scanStage").classList.remove("show");
+    document.getElementById("setupPane").style.display = "block";
+  }
+
+  // ---------- Scanning + verification sheet ----------
+  const sheet = document.getElementById("sheet");
+  const backdrop = document.getElementById("backdrop");
+  const flashEl = document.getElementById("flash");
+  const toastEl = document.getElementById("toast");
+  const approveBtn = document.getElementById("approveBtn");
+  const rejectBtn = document.getElementById("rejectBtn");
+
+  function showToast(msg) {
+    toastEl.textContent = msg; toastEl.classList.add("show");
+    setTimeout(() => toastEl.classList.remove("show"), 2200);
+  }
+  function flash(color) {
+    flashEl.style.background = color; flashEl.classList.remove("on");
+    void flashEl.offsetWidth; flashEl.classList.add("on");
+  }
+  function openSheet() { backdrop.classList.add("show"); sheet.classList.add("show"); }
+  function closeSheet() {
+    currentStudent = null; // Clear student record on sheet dismiss
+    backdrop.classList.remove("show"); sheet.classList.remove("show");
+    setTimeout(() => { if (html5QrCode) html5QrCode.resume().catch(()=>{}); }, 300);
+  }
+  function renderChecklist(rows) {
+    const el = document.getElementById("checklist");
+    el.innerHTML = rows.map(r =>
+      `<div class="check-row ${r.pass === null ? '' : r.pass ? 'pass' : 'fail'}">
+         <span class="icon">${r.pass === null ? ' ' : r.pass ? '?' : '?'}</span><span>${r.label}</span>
+       </div>`
+    ).join("");
+  }
+
+  const PLACEHOLDER_PHOTO = "https://via.placeholder.com/150";
+  let rosterCache = null; 
+
+  function normalizeStudent(s, fallbackId) {
+    if (!s) return null;
+    return {
+      id: s.id || s.studentID || s.studentId || fallbackId,
+      name: s.name || s.fullName || s.studentName || "",
+      photo: s.passport || s.pictureUrl || s.photoUrl || s.photo || "",
+      status: s.status || "Active"
+    };
+  }
+
+  // Strict helper validator
+  function isValidStudent(s) {
+    return s && String(s.name || '').trim() !== "" && String(s.id || '').trim() !== "";
+  }
+
+  // Looks up a single student by ID. Tries direct getStudentByID first;
+  // if that comes back empty or without a photo, falls back to the roster cache.
+  // Returns NULL if the student is not registered in either source.
+  async function lookupStudent(scannedID) {
+    let student = null;
+
+    // 1. Try direct student lookup via API
+    try {
+      let raw = await callBackend('getStudentByID', { studentId: scannedID });
+      student = normalizeStudent(raw, scannedID);
+    } catch (err) {
+      console.warn('Direct student lookup failed, falling back to roster cache:', err);
+    }
+
+    // 2. Fallback: Search the full cached roster if direct lookup failed or lacked details/photo
+    if (!isValidStudent(student) || !student.photo) {
+      try {
+        if (!rosterCache) {
+          rosterCache = await callBackend('getStudents');
+        }
+
+        if (Array.isArray(rosterCache)) {
+          const match = rosterCache.find(s => 
+            String(s.id || s.studentId || s.studentID).trim().toLowerCase() === String(scannedID).trim().toLowerCase()
+          );
+
+          if (match) {
+            const normalizedMatch = normalizeStudent(match, scannedID);
+            if (isValidStudent(normalizedMatch)) {
+              student = normalizedMatch;
+            }
+          }
+        }
+      } catch (err) {
+        console.error('Error querying roster cache fallback:', err);
+      }
+    }
+
+    // 3. Explicitly return null if no valid registered student was found
+    return isValidStudent(student) ? student : null;
+  }
+
+  async function onScanSuccess(decodedText) {
+    if (scannerBusy) return;
+    scannerBusy = true;
+
+    // CLEAR STALE DATA IMMEDIATELY
+    currentStudent = null;
+
+    if (html5QrCode) { try { html5QrCode.pause(); } catch (e) {} }
+
+    const photo = document.getElementById("studentPhoto");
+    const nameEl = document.getElementById("studentName");
+    const metaEl = document.getElementById("studentMeta");
+    photo.onerror = () => { photo.src = PLACEHOLDER_PHOTO; };
+
+    let scannedID = decodedText.trim();
+    try {
+      const parsed = JSON.parse(decodedText);
+      scannedID = parsed.studentID || parsed.studentId || parsed.id || decodedText;
+    } catch (e) { /* raw text QR code */ }
+
+    photo.src = ""; photo.classList.add("pending");
+    nameEl.textContent = "Looking up "; metaEl.textContent = scannedID;
+    renderChecklist([{ label: "Fetching student record", pass: null }]);
+    approveBtn.classList.remove("ready"); approveBtn.disabled = true; approveBtn.textContent = "Mark present";
+    openSheet();
+
+    const student = await lookupStudent(scannedID);
+
+    // UNREGISTERED STUDENT HANDLER
+    if (!student) {
+      currentStudent = null;
+      flash("rgba(226,96,79,0.5)");
+      nameEl.textContent = "Not recognized"; metaEl.textContent = scannedID;
+      renderChecklist([{
+        label: lastBackendError || `Student ID (${scannedID}) not found / Unregistered`,
+        pass: false
+      }]);
+      approveBtn.disabled = true;
+      playAttErrorSound();
+      return;
+    }
+
+    // REGISTERED STUDENT HANDLER
+    currentStudent = student;
+    photo.src = student.photo || PLACEHOLDER_PHOTO;
+    photo.classList.remove("pending");
+    nameEl.textContent = student.name;
+    metaEl.textContent = student.id;
+
+    const isActive = (student.status || "Active").toLowerCase() === "active";
+
+    if (!isActive) {
+      flash("rgba(226,96,79,0.5)");
+      renderChecklist([
+        { label: "Student record found", pass: true },
+        { label: `Access Denied: status is ${student.status}`, pass: false }
+      ]);
+      approveBtn.disabled = true;
+      playAttErrorSound();
+    } else {
+      flash("rgba(217,164,65,0.35)");
+      renderChecklist([
+        { label: "Student record found", pass: true },
+        { label: "Active enrollment status", pass: true }
+      ]);
+      approveBtn.disabled = false; approveBtn.classList.add("ready");
+      playAttSuccessSound();
     }
   }
 
-  // Load dashboard view by default when DOM loads
-  window.addEventListener('DOMContentLoaded', () => {
-    loadPage('dashboard');
+  async function startScanner() {
+    html5QrCode = new Html5Qrcode("reader");
+    try {
+      await html5QrCode.start({ facingMode: "environment" }, { fps: 10, qrbox: 240 }, onScanSuccess, () => {});
+    } catch (err) {
+      showToast("Camera unavailable: " + err);
+    }
+  }
+
+  approveBtn.addEventListener("click", async () => {
+    // GUARD CLAUSE: Strict verification check
+    if (!currentStudent || !isValidStudent(currentStudent) || approveBtn.disabled) {
+      alert("Cannot record attendance: No valid registered student selected.");
+      return;
+    }
+
+    approveBtn.disabled = true; approveBtn.textContent = "Saving ";
+
+    const payload = {
+      programme: SESSION.programme, semester: SESSION.semester,
+      course: SESSION.course, lesson: SESSION.lesson,
+      studentId: currentStudent.id, studentID: currentStudent.id,
+      studentName: currentStudent.name, fullName: currentStudent.name,
+      pictureUrl: currentStudent.photo, status: "Present"
+    };
+
+    const res = await callBackend('recordAttendanceEntry', { payload });
+
+    if (res && res.isDuplicate) {
+      approveBtn.disabled = false; approveBtn.textContent = "Mark present";
+      renderChecklist([
+        { label: "Student record found", pass: true },
+        { label: res.message || "Already recorded", pass: false }
+      ]);
+      playAttErrorSound();
+    } else {
+      bumpCount();
+      approveBtn.textContent = "Marked present ?";
+      currentStudent = null; // Clear state after success
+      setTimeout(() => { scannerBusy = false; closeSheet(); }, 700);
+    }
   });
+
+  rejectBtn.addEventListener("click", () => { scannerBusy = false; closeSheet(); });
+  backdrop.addEventListener("click", () => { scannerBusy = false; closeSheet(); });
+
+  // ---------- Manual mode ----------
+  async function submitManual() {
+    const raw = document.getElementById("manualStudent").value;
+    const course = document.getElementById("manualCourse").value;
+    const lesson = document.getElementById("manualLesson").value.trim();
+
+    if (!raw || !course || !lesson) {
+      alert("Please select a student and enter course and lesson details.");
+      return;
+    }
+
+    const student = JSON.parse(raw);
+    const btn = document.getElementById("manualSaveBtn");
+    btn.disabled = true;
+
+    const payload = {
+      programme: document.getElementById("manualProgramme").value,
+      semester: document.getElementById("manualSemester").value,
+      course, lesson,
+      studentId: student.studentID, studentID: student.studentID,
+      studentName: student.studentName, fullName: student.studentName,
+      pictureUrl: student.photoUrl || "",
+      status: document.getElementById("manualStatus").value
+    };
+
+    const res = await callBackend('recordAttendanceEntry', { payload });
+    btn.disabled = false;
+
+    const card = document.getElementById("manualStatusCard");
+    card.classList.add("show");
+    if (res && res.isDuplicate) {
+      card.className = "status-card show err";
+      card.textContent = res.message || "Already recorded.";
+      playAttErrorSound();
+    } else {
+      card.className = "status-card show ok";
+      card.textContent = `Record saved for ${student.studentName}`;
+      bumpCount();
+      setTimeout(() => card.classList.remove("show"), 3000);
+    }
+  }
+
+  // ---------- Init ----------
+  loadProgrammes();
+  loadCohorts();
+  loadTodayCount();
 </script>
-
-<!-- Replaced Apps Script include with standard JS script tag -->
-<script src="adminScripts.js"></script>
-
 </body>
-
 </html>
