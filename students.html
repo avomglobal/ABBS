@@ -1,0 +1,2350 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+  <title>ABBS SIS</title>
+  <meta name="robots" content="noindex, nofollow">
+  <!-- Your settings (Apps Script URL, attendance link) live in config.js -->
+  <script src="config.js"></script>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css" rel="stylesheet">
+  
+  <style>
+    :root {
+      --bg-main: #0F172A;
+      --bg-card: #1E293B;
+      --bg-hover: #334155;
+      --accent: #3B82F6;
+      --accent-gradient: linear-gradient(135deg, #2563EB, #1D4ED8);
+      --text-main: #F8FAFC;
+      --text-muted: #94A3B8;
+      --border-color: #334155;
+      --radius: 12px;
+      --sidebar-width: 260px;
+    }
+
+    * { 
+      box-sizing: border-box; 
+      margin: 0; 
+      padding: 0; 
+      font-family: 'Inter', sans-serif; 
+    }
+
+    body { 
+      background-color: var(--bg-main); 
+      color: var(--text-main); 
+      font-size: 16px; 
+      padding-bottom: 70px; 
+      -webkit-text-size-adjust: 100%;
+    }
+
+    .app-header { 
+      background: var(--bg-card); 
+      padding: 12px 16px; 
+      display: flex; 
+      justify-content: space-between; 
+      align-items: center; 
+      border-bottom: 1px solid var(--border-color); 
+      position: sticky; 
+      top: 0; 
+      z-index: 90; 
+    }
+
+    .brand { display: flex; align-items: center; gap: 12px; }
+    .brand-logo { width: 32px; height: 32px; background: var(--accent-gradient); border-radius: 8px; display: grid; place-items: center; font-weight: 700; color: #fff; }
+    .brand-title { font-size: 18px; font-weight: 700; }
+
+    .sidebar { position: fixed; top: 0; left: calc(-1 * var(--sidebar-width)); width: var(--sidebar-width); height: 100vh; background: var(--bg-card); border-right: 1px solid var(--border-color); z-index: 200; transition: left 0.3s ease-in-out; }
+    .sidebar.open { left: 0; }
+    .sidebar-header { padding: 16px; display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid var(--border-color); }
+    .sidebar-menu { list-style: none; padding: 12px 8px; }
+    .menu-item { display: flex; align-items: center; gap: 14px; padding: 14px 16px; color: var(--text-muted); border-radius: 8px; font-weight: 500; font-size: 15px; cursor: pointer; }
+    .menu-item:hover, .menu-item.active { background: var(--bg-hover); color: var(--text-main); }
+    
+    .overlay { position: fixed; top: 0; left: 0; width: 100vw; height: 100vh; background: rgba(0, 0, 0, 0.6); backdrop-filter: blur(2px); z-index: 150; display: none; }
+    .overlay.active { display: block; }
+    .container { padding: 16px; display: flex; flex-direction: column; gap: 16px; }
+    
+    .bottom-nav { position: fixed; bottom: 0; left: 0; right: 0; height: 60px; background: var(--bg-card); border-top: 1px solid var(--border-color); display: flex; justify-content: space-around; align-items: center; z-index: 90; }
+    .nav-item { display: flex; flex-direction: column; align-items: center; gap: 4px; color: var(--text-muted); font-size: 12px; cursor: pointer; }
+    .nav-item i { font-size: 18px; }
+    .nav-item.active { color: var(--accent); }
+    .module-card { background: var(--bg-card); border: 1px solid var(--border-color); border-radius: var(--radius); padding: 16px; }
+
+    /* Mobile Enhancements */
+    @media screen and (max-width: 600px) {
+      body { font-size: 16px; }
+      table, td, th { font-size: 14px !important; }
+      input:not([type="checkbox"]):not([type="radio"]), select, button { font-size: 15px !important; min-height: 44px; }
+      .text-muted { font-size: 13px !important; }
+    }
+  </style>
+</head>
+<body>
+
+  <script>
+    /* ============================================================
+     * Connection to the Google Apps Script backend (GitHub edition)
+     * ------------------------------------------------------------
+     * Every module file below still calls google.script.run exactly as it always did.
+     * This block gives it a real implementation: it turns each call into one fetch()
+     * to your Apps Script web app, so nothing in the module files had to change.
+     * ============================================================ */
+    (function () {
+      const CFG = window.ABBS_CONFIG1 || {};
+      const API_URL1 = String(CFG.API_URL1 || '').trim();
+      const SESSION_KEY = 'abbs.sis.session';
+
+      window.isConnected = function () { return API_URL1 !== ''; };
+      let session = null;   // { key } once signed in
+
+      function store(kind) { try { return kind === 'local' ? window.localStorage : window.sessionStorage; } catch (e) { return null; } }
+      function readSession() {
+        for (const kind of ['local', 'session']) {
+          try {
+            const raw = store(kind) && store(kind).getItem(SESSION_KEY);
+            const s = raw ? JSON.parse(raw) : null;
+            if (s && s.key) return s;
+          } catch (e) { /* ignore */ }
+        }
+        return null;
+      }
+      function clearSession() { ['local', 'session'].forEach(k => { try { store(k) && store(k).removeItem(SESSION_KEY); } catch (e) {} }); }
+      function writeSession(s, remember) { clearSession(); try { store(remember ? 'local' : 'session').setItem(SESSION_KEY, JSON.stringify(s)); } catch (e) {} }
+
+      // Demo mode: when there is no API_URL yet, reads resolve to a safe empty value
+      // instead of failing, and writes are simulated so the page never crashes.
+      const DEMO_LIST_ACTIONS = ['getStudents', 'getCohorts', 'getCourses', 'getProgrammes', 'getProgrammesList',
+        'getMasterCoursesList', 'getAllMasterCourses', 'getEnrolments', 'getAssessments', 'getCoursesByProgramme',
+        'getCoursesByProgrammeId', 'getCohortsList', 'getAttendanceLogs', 'getStudentsByProgrammeAndCohort'];
+      const DEMO_DEFAULTS = {
+        getDashboardMetrics: { totalStudents: 0, totalEnrolments: 0, totalProgrammes: 0, activeProgrammes: 0, totalCourses: 0, programmeBreakdown: [], recentEnrolments: [] },
+        getEnrolmentFormData: { students: [], programmes: [], cohorts: [] },
+        getTodayAttendanceCount: 0,
+        calculateAttendanceScore: 0
+      };
+      function demoResult(action) {
+        if (Object.prototype.hasOwnProperty.call(DEMO_DEFAULTS, action)) return DEMO_DEFAULTS[action];
+        if (DEMO_LIST_ACTIONS.indexOf(action) !== -1) return [];
+        return null;   // a save/delete action: nothing to return
+      }
+      function isWriteAction(action) { return /^(save|delete|record)/i.test(action); }
+
+      async function callApi(action, args) {
+        if (action === 'ping') { /* not used by the page itself, kept for manual checks */ }
+        if (!isConnected()) {
+          if (isWriteAction(action)) { alert('Demo Mode: ' + action + ' simulated.'); }
+          return demoResult(action);
+        }
+        const ctl = new AbortController();
+        const timer = setTimeout(() => ctl.abort(), 90000);
+        let res;
+        try {
+          res = await fetch(API_URL1, {
+            method: 'POST',
+            headers: { 'Content-Type': 'text/plain;charset=utf-8' },   // stays a "simple" request: no CORS pre-flight
+            body: JSON.stringify({ action, key: session ? session.key : '', args: args || [] }),
+            redirect: 'follow',
+            signal: ctl.signal
+          });
+        } catch (e) {
+          throw new Error(e && e.name === 'AbortError' ? 'The server took too long to answer. Please try again.' : 'Cannot reach the server. Check your internet connection.');
+        } finally { clearTimeout(timer); }
+        let out;
+        try { out = await res.json(); } catch (e) {
+          throw new Error('The server gave an unexpected answer. Check that the Apps Script web app is deployed with "Who has access: Anyone" and that API_URL1 in config.js is right.');
+        }
+        if (!out || !out.ok) { const err = new Error((out && out.error) || 'The request failed.'); err.code = out && out.code; throw err; }
+        return out.data;
+      }
+
+      // Same shape as the real google.script.run, so every existing module file works unchanged:
+      //   google.script.run.withSuccessHandler(fn).withFailureHandler(fn).someFunction(arg1, arg2, ...)
+      function makeRunner(successCb, failureCb) {
+        return new Proxy({}, {
+          get(_, action) {
+            if (action === 'withSuccessHandler') return fn => makeRunner(fn, failureCb);
+            if (action === 'withFailureHandler') return fn => makeRunner(successCb, fn);
+            return function () {
+              const args = Array.prototype.slice.call(arguments);
+              callApi(action, args).then(
+                data => { if (successCb) successCb(data); },
+                err => {
+                  // A wrong or expired key sends everyone back to the sign-in screen,
+                  // even if this particular call did not set up its own failure handler.
+                  if (err && (err.code === 'AUTH' || err.code === 'LOCKED') && session) { signOut(err.message); return; }
+                  if (failureCb) failureCb(err); else console.error('[' + action + ']', err);
+                }
+              );
+            };
+          }
+        });
+      }
+      window.google = window.google || {};
+      window.google.script = window.google.script || {};
+      window.google.script.run = makeRunner(null, null);
+
+      /* ---------- sign in / sign out ---------- */
+
+      function showLogin(message) {
+        document.getElementById('login-overlay').style.display = 'flex';
+        document.body.style.overflow = 'hidden';
+        const err = document.getElementById('login-error');
+        err.textContent = message || '';
+        err.style.display = message ? 'block' : 'none';
+        document.getElementById('login-key').value = '';
+        setTimeout(() => document.getElementById('login-key').focus(), 50);
+      }
+      function hideLogin() {
+        document.getElementById('login-overlay').style.display = 'none';
+        document.body.style.overflow = '';
+      }
+      function updateWho() {
+        document.getElementById('who-row').style.display = session ? 'block' : 'none';
+        document.getElementById('signout-row').style.display = session ? 'block' : 'none';
+        document.getElementById('who').textContent = session ? 'Staff' : '';
+      }
+
+      window.handleLogin = function (e) {
+        e.preventDefault();
+        const btn = document.getElementById('btn-login');
+        const key = document.getElementById('login-key').value;
+        const remember = document.getElementById('login-remember').checked;
+        if (!key) return;
+
+        btn.disabled = true; btn.textContent = 'Signing in...';
+        session = { key };
+        callApi('getDashboardMetrics', [])   // doubles as the key check
+          .then(() => {
+            writeSession(session, remember);
+            hideLogin();
+            updateWho();
+            window.__afterLogin ? window.__afterLogin() : startApp();
+          })
+          .catch(err => { session = null; showLogin(err && err.message ? err.message : String(err)); })
+          .finally(() => { btn.disabled = false; btn.textContent = 'Sign in'; });
+      };
+
+      window.signOut = function (message) {
+        clearSession();
+        session = null;
+        updateWho();
+        document.getElementById('main-content').innerHTML = '';
+        if (document.getElementById('sidebar').classList.contains('open')) toggleSidebar();
+        showLogin(typeof message === 'string' ? message : '');
+      };
+
+      /* ---------- start-up ---------- */
+
+      function startApp() {
+        const defaultElement = document.getElementById('menu-dashboard');
+        loadModule('Dashboard', 'fa-chart-pie', defaultElement);
+      }
+
+      window.addEventListener('DOMContentLoaded', () => {
+        if (!isConnected()) {
+          document.getElementById('demo-banner').style.display = 'block';
+          startApp();
+          return;
+        }
+        session = readSession();
+        if (session) { updateWho(); startApp(); } else { showLogin(); }
+      });
+    })();
+  </script>
+
+  <!-- Overlay for Sidebar & Modals -->
+  <div class="overlay" id="modal-overlay" onclick="closeModal()"></div>
+
+  <!-- Sidebar -->
+  <aside class="sidebar" id="sidebar">
+    <div class="sidebar-header">
+      <div class="brand">
+        <div class="brand-logo">A</div>
+        <div class="brand-title">ABBS SIS</div>
+      </div>
+      <button onclick="toggleSidebar()" style="background:none; border:none; color:#fff;"><i class="fa-solid fa-xmark"></i></button>
+    </div>
+
+    <ul class="sidebar-menu">
+      <li id="who-row" style="display:none; padding:8px 16px 4px; color:var(--text-muted); font-size:12px;">Signed in as <strong id="who" style="color:var(--text-main);"></strong></li>
+      <li><a id="menu-dashboard" class="menu-item active" onclick="loadModule('Dashboard', 'fa-chart-pie', this)"><i class="fa-solid fa-chart-pie"></i> Dashboard</a></li>
+      <li><a class="menu-item" onclick="loadModule('Programmes', 'fa-sitemap', this)"><i class="fa-solid fa-sitemap"></i> Programmes</a></li>
+      <li><a class="menu-item" onclick="loadModule('Courses', 'fa-book-open', this)"><i class="fa-solid fa-book-open"></i> Courses</a></li>
+      <li><a class="menu-item" onclick="loadModule('Cohorts', 'fa-users-rectangle', this)"><i class="fa-solid fa-users-rectangle"></i> Cohorts</a></li>
+      <li><a class="menu-item" onclick="loadModule('Students', 'fa-user-graduate', this)"><i class="fa-solid fa-user-graduate"></i> Students</a></li>
+      <li><a class="menu-item" onclick="loadModule('Enrolment', 'fa-address-card', this)"><i class="fa-solid fa-address-card"></i> Enrolment</a></li>
+      <li><a class="menu-item" onclick="loadModule('Attendance', 'fa-clipboard-user', this)"><i class="fa-solid fa-clipboard-user"></i> Attendance (Webcam)</a></li>
+      <li><a class="menu-item" onclick="loadModule('Assessment', 'fa-file-signature', this)"><i class="fa-solid fa-file-signature"></i> Assessment</a></li>
+      <li id="signout-row" style="display:none; border-top:1px solid var(--border-color); margin-top:8px; padding-top:8px;">
+        <a class="menu-item" onclick="signOut()"><i class="fa-solid fa-right-from-bracket"></i> Sign out</a>
+      </li>
+    </ul>
+  </aside>
+
+  <!-- Top App Bar -->
+  <header class="app-header">
+    <div class="brand">
+      <button onclick="toggleSidebar()" style="background:none; border:none; color:#fff; font-size:18px;"><i class="fa-solid fa-bars"></i></button>
+      <div class="brand-title" id="page-title">Dashboard</div>
+    </div>
+  </header>
+
+  <!-- Shown only while config.js has no API_URL1 -->
+  <div id="demo-banner" style="display:none; background:#F59E0B22; color:#F59E0B; border-bottom:1px solid #F59E0B55; text-align:center; font-size:12px; padding:8px 10px;">
+    Demo mode: this page is not connected to your Google Sheet yet. Add your Apps Script URL in <strong>config.js</strong>.
+  </div>
+
+  <!-- View Outlet -->
+  <main class="container" id="main-content"></main>
+
+  <!-- Bottom Nav -->
+  <nav class="bottom-nav">
+    <a class="nav-item active" onclick="loadModule('Dashboard', 'fa-chart-pie')"><i class="fa-solid fa-house"></i><span>Home</span></a>
+    <a class="nav-item" onclick="loadModule('Students', 'fa-user-graduate')"><i class="fa-solid fa-user-graduate"></i><span>Students</span></a>
+    <a class="nav-item" onclick="loadModule('Attendance', 'fa-clipboard-user')"><i class="fa-solid fa-clipboard-user"></i><span>Attendance</span></a>
+    <a class="nav-item" onclick="toggleSidebar()"><i class="fa-solid fa-ellipsis"></i><span>More</span></a>
+  </nav>
+
+
+  <!-- SIGN-IN SCREEN -->
+  <div id="login-overlay" style="display:none; position:fixed; inset:0; z-index:500; background:var(--bg-main); align-items:center; justify-content:center; padding:16px; overflow-y:auto;">
+    <div style="width:100%; max-width:360px; margin:auto;">
+      <div style="text-align:center; margin-bottom:20px;">
+        <div class="brand-logo" style="width:52px; height:52px; font-size:22px; margin:0 auto 10px;">A</div>
+        <div style="font-size:22px; font-weight:700;">ABBS SIS</div>
+        <div style="color:var(--text-muted); font-size:13px;">Student Information System</div>
+      </div>
+      <form id="login-form" onsubmit="handleLogin(event)" style="background:var(--bg-card); border:1px solid var(--border-color); border-radius:var(--radius); padding:20px; display:flex; flex-direction:column; gap:12px;">
+        <div>
+          <label style="font-size:11px; color:var(--text-muted); display:block; margin-bottom:4px;">Access key</label>
+          <input id="login-key" type="password" required autocomplete="current-password" style="width:100%; padding:10px; background:var(--bg-main); border:1px solid var(--border-color); color:#fff; border-radius:6px;">
+        </div>
+        <label style="display:flex; align-items:center; gap:8px; font-size:13px; color:var(--text-muted);">
+          <input type="checkbox" id="login-remember" checked style="width:16px; height:16px; min-height:0;"> Keep me signed in on this device
+        </label>
+        <p id="login-error" style="display:none; font-size:13px; color:#EF4444; background:#EF444422; border:1px solid #EF444455; border-radius:6px; padding:8px;"></p>
+        <button type="submit" id="btn-login" style="padding:12px; background:var(--accent); color:#fff; border:none; border-radius:6px; font-weight:600;">Sign in</button>
+      </form>
+      <p style="text-align:center; color:var(--text-muted); font-size:11px; margin-top:14px;">Ask the school office for the access key.</p>
+    </div>
+  </div>
+
+  <!-- INJECT MODULE FILES -->
+
+  <!-- ===== Dashboard module (was: include('Dashboard')) ===== -->
+<!-- Dashboard View Container (Injected inside #main-content) -->
+<script>
+  window.dashboardMetricsData = window.dashboardMetricsData || null;
+
+  function renderDashboardView() {
+    const contentPanel = document.getElementById('main-content');
+    contentPanel.innerHTML = `
+      <div class="module-card">
+        <!-- Header Shortcuts -->
+        <div style="background: var(--bg-main); border: 1px solid var(--border-color); border-radius: var(--radius); padding: 12px; margin-bottom: 16px;">
+          <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(100px, 1fr)); gap: 10px;">
+            <button onclick="loadModule('Students')" style="background: var(--bg-card); border: 1px solid var(--border-color); color: #fff; padding: 10px 8px; border-radius: 6px; font-size: 12px; display: flex; flex-direction: column; align-items: center; gap: 6px; cursor: pointer;">
+              <i class="fa-solid fa-user-plus" style="color: var(--accent);"></i>
+              <span>Add Student</span>
+            </button>
+            <button onclick="loadModule('Enrolment')" style="background: var(--bg-card); border: 1px solid var(--border-color); color: #fff; padding: 10px 8px; border-radius: 6px; font-size: 12px; display: flex; flex-direction: column; align-items: center; gap: 6px; cursor: pointer;">
+              <i class="fa-solid fa-id-card" style="color: #8B5CF6;"></i>
+              <span>New Enrolment</span>
+            </button>
+            <button onclick="loadModule('Programmes')" style="background: var(--bg-card); border: 1px solid var(--border-color); color: #fff; padding: 10px 8px; border-radius: 6px; font-size: 12px; display: flex; flex-direction: column; align-items: center; gap: 6px; cursor: pointer;">
+              <i class="fa-solid fa-diagram-project" style="color: #F59E0B;"></i>
+              <span>Programmes</span>
+            </button>
+          </div>
+        </div>
+
+        <!-- KPI Summary Grid -->
+        <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 12px; margin-bottom: 16px;">
+          <div style="background: var(--bg-main); border: 1px solid var(--border-color); border-radius: var(--radius); padding: 14px; display: flex; align-items: center; gap: 12px;">
+            <div style="width: 42px; height: 42px; border-radius: 8px; background: rgba(59, 130, 246, 0.15); color: var(--accent); display: flex; align-items: center; justify-content: center; font-size: 18px;">
+              <i class="fa-solid fa-graduation-cap"></i>
+            </div>
+            <div>
+              <div id="kpi-students" style="font-size: 20px; font-weight: 700; line-height: 1.2;">--</div>
+              <div style="font-size: 11px; color: var(--text-muted);">Total Students</div>
+            </div>
+          </div>
+
+          <div style="background: var(--bg-main); border: 1px solid var(--border-color); border-radius: var(--radius); padding: 14px; display: flex; align-items: center; gap: 12px;">
+            <div style="width: 42px; height: 42px; border-radius: 8px; background: rgba(139, 92, 246, 0.15); color: #8B5CF6; display: flex; align-items: center; justify-content: center; font-size: 18px;">
+              <i class="fa-solid fa-address-card"></i>
+            </div>
+            <div>
+              <div id="kpi-enrolments" style="font-size: 20px; font-weight: 700; line-height: 1.2;">--</div>
+              <div style="font-size: 11px; color: var(--text-muted);">Active Enrolments</div>
+            </div>
+          </div>
+
+          <div style="background: var(--bg-main); border: 1px solid var(--border-color); border-radius: var(--radius); padding: 14px; display: flex; align-items: center; gap: 12px;">
+            <div style="width: 42px; height: 42px; border-radius: 8px; background: rgba(245, 158, 11, 0.15); color: #F59E0B; display: flex; align-items: center; justify-content: center; font-size: 18px;">
+              <i class="fa-solid fa-sitemap"></i>
+            </div>
+            <div>
+              <div id="kpi-programmes" style="font-size: 20px; font-weight: 700; line-height: 1.2;">--</div>
+              <div style="font-size: 11px; color: var(--text-muted);">Programmes</div>
+            </div>
+          </div>
+
+          <div style="background: var(--bg-main); border: 1px solid var(--border-color); border-radius: var(--radius); padding: 14px; display: flex; align-items: center; gap: 12px;">
+            <div style="width: 42px; height: 42px; border-radius: 8px; background: rgba(16, 185, 129, 0.15); color: #10B981; display: flex; align-items: center; justify-content: center; font-size: 18px;">
+              <i class="fa-solid fa-book-open"></i>
+            </div>
+            <div>
+              <div id="kpi-courses" style="font-size: 20px; font-weight: 700; line-height: 1.2;">--</div>
+              <div style="font-size: 11px; color: var(--text-muted);">Master Courses</div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Analytics & Activity Grid -->
+        <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 16px;">
+          
+          <!-- Programme Breakdown -->
+          <div style="background: var(--bg-main); border: 1px solid var(--border-color); border-radius: var(--radius); padding: 16px;">
+            <div style="font-size: 14px; font-weight: 600; margin-bottom: 12px; display: flex; justify-content: space-between; align-items: center;">
+              <span>Enrolment by Programme</span>
+              <i class="fa-solid fa-chart-pie" style="color: var(--accent);"></i>
+            </div>
+            <div id="programme-breakdown-list">
+              <div style="color: var(--text-muted); font-size: 12px; text-align: center; padding: 16px;">Loading metrics...</div>
+            </div>
+          </div>
+
+          <!-- Recent Activity Table -->
+          <div style="background: var(--bg-main); border: 1px solid var(--border-color); border-radius: var(--radius); padding: 16px;">
+            <div style="font-size: 14px; font-weight: 600; margin-bottom: 12px; display: flex; justify-content: space-between; align-items: center;">
+              <span>Recent Enrolments</span>
+              <i class="fa-solid fa-clock-rotate-left" style="color: #8B5CF6;"></i>
+            </div>
+            <table style="width: 100%; border-collapse: collapse; font-size: 12px;">
+              <tbody id="recent-enrolment-rows">
+                <tr>
+                  <td style="color: var(--text-muted); text-align: center; padding: 16px;">Loading recent activities...</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+
+        </div>
+      </div>
+    `;
+
+    fetchDashboardMetricsData();
+  }
+
+  function fetchDashboardMetricsData() {
+    if (typeof google !== 'undefined' && google.script && google.script.run) {
+      google.script.run
+        .withSuccessHandler(data => {
+          window.dashboardMetricsData = data;
+          populateDashboardView(data);
+        })
+        .withFailureHandler(err => {
+          const breakdown = document.getElementById('programme-breakdown-list');
+          if (breakdown) breakdown.innerHTML = `<p style="color: #EF4444; font-size: 12px; text-align: center;">Error loading data: ${err.message}</p>`;
+        })
+        .getDashboardMetrics();
+    }
+  }
+
+  function populateDashboardView(data) {
+    if (!data) return;
+
+    // Set KPI Counters
+    const kpiStud = document.getElementById('kpi-students');
+    const kpiEnrol = document.getElementById('kpi-enrolments');
+    const kpiProg = document.getElementById('kpi-programmes');
+    const kpiCour = document.getElementById('kpi-courses');
+
+    if (kpiStud) kpiStud.innerText = data.totalStudents || 0;
+    if (kpiEnrol) kpiEnrol.innerText = data.totalEnrolments || 0;
+    if (kpiProg) kpiProg.innerText = `${data.activeProgrammes || 0}/${data.totalProgrammes || 0}`;
+    if (kpiCour) kpiCour.innerText = data.totalCourses || 0;
+
+    // Render Programme Breakdown
+    const progContainer = document.getElementById('programme-breakdown-list');
+    if (progContainer) {
+      if (!data.programmeBreakdown || data.programmeBreakdown.length === 0) {
+        progContainer.innerHTML = '<div style="color: var(--text-muted); font-size: 12px; text-align: center; padding: 12px;">No active enrolments recorded.</div>';
+      } else {
+        let progHtml = '';
+        const maxEnrolments = Math.max(...data.programmeBreakdown.map(p => p.count), 1);
+
+        data.programmeBreakdown.forEach(p => {
+          const pct = Math.round((p.count / maxEnrolments) * 100);
+          progHtml += `
+            <div style="margin-bottom: 10px;">
+              <div style="display: flex; justify-content: space-between; font-size: 12px; margin-bottom: 4px;">
+                <span>${p.name}</span>
+                <span style="font-weight: 600; color: var(--accent);">${p.count} Enrolled</span>
+              </div>
+              <div style="width: 100%; height: 6px; background: var(--bg-card); border-radius: 3px; overflow: hidden;">
+                <div style="height: 100%; background: var(--accent); width: ${pct}%; border-radius: 3px;"></div>
+              </div>
+            </div>
+          `;
+        });
+        progContainer.innerHTML = progHtml;
+      }
+    }
+
+    // Render Recent Enrolments Table
+    const recentContainer = document.getElementById('recent-enrolment-rows');
+    if (recentContainer) {
+      if (!data.recentEnrolments || data.recentEnrolments.length === 0) {
+        recentContainer.innerHTML = '<tr><td style="color: var(--text-muted); font-size: 12px; text-align: center; padding: 12px;">No recent enrolments found.</td></tr>';
+      } else {
+        let recentHtml = '';
+        data.recentEnrolments.forEach(item => {
+          recentHtml += `
+            <tr style="border-bottom: 1px solid rgba(51, 65, 85, 0.4);">
+              <td style="padding: 8px 0;">
+                <div style="font-weight: 600; font-size: 13px;">${item.studentName}</div>
+                <div style="color: var(--text-muted); font-size: 11px;">${item.programme} &bull; ${item.cohort}</div>
+              </td>
+              <td style="text-align: right; color: var(--text-muted); font-size: 11px; padding: 8px 0;">
+                ${item.date}
+              </td>
+            </tr>
+          `;
+        });
+        recentContainer.innerHTML = recentHtml;
+      }
+    }
+  }
+</script>
+
+
+  <!-- ===== Programmes module (was: include('Programmes')) ===== -->
+<style>
+  .prog-card-container {
+    background: var(--bg-card, #1E293B);
+    border: 1px solid var(--border-color, #334155);
+    border-radius: var(--radius, 8px);
+    padding: 20px;
+    max-width: 900px;
+    margin: 0 auto;
+    box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.3);
+  }
+
+  .prog-header-bar {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 16px;
+    gap: 10px;
+  }
+
+  .prog-header-bar h3 {
+    margin: 0;
+    font-size: 18px;
+    font-weight: 600;
+    color: #FFFFFF;
+  }
+
+  .btn-accent-prog {
+    padding: 8px 14px;
+    background: var(--accent, #3B82F6);
+    color: #FFFFFF;
+    border: none;
+    border-radius: 6px;
+    font-size: 13px;
+    font-weight: 600;
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    cursor: pointer;
+  }
+
+  .btn-accent-prog:hover {
+    background: var(--accent-hover, #2563EB);
+  }
+
+  .btn-sec-prog {
+    padding: 8px 14px;
+    background: var(--bg-hover, #334155);
+    color: #FFFFFF;
+    border: 1px solid var(--border-color, #334155);
+    border-radius: 6px;
+    font-size: 13px;
+    cursor: pointer;
+  }
+
+  .search-input-prog {
+    width: 100%;
+    padding: 10px 12px;
+    background: var(--bg-main, #0F172A);
+    border: 1px solid var(--border-color, #334155);
+    color: #FFFFFF;
+    border-radius: 6px;
+    font-size: 13px;
+    margin-bottom: 16px;
+    outline: none;
+  }
+
+  .search-input-prog:focus {
+    border-color: var(--accent, #3B82F6);
+  }
+
+  .prog-list-box {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+  }
+
+  .prog-card-item {
+    background: var(--bg-main, #0F172A);
+    border: 1px solid var(--border-color, #334155);
+    padding: 14px;
+    border-radius: 6px;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+  }
+
+  .badge-prog-active {
+    background: rgba(16, 185, 129, 0.15);
+    color: #10B981;
+    padding: 3px 8px;
+    border-radius: 4px;
+    font-size: 11px;
+    font-weight: 600;
+  }
+
+  .badge-prog-inactive {
+    background: rgba(239, 68, 68, 0.15);
+    color: #EF4444;
+    padding: 3px 8px;
+    border-radius: 4px;
+    font-size: 11px;
+    font-weight: 600;
+  }
+
+  .prog-modal-mask {
+    position: fixed;
+    top: 0; left: 0; right: 0; bottom: 0;
+    background: rgba(0, 0, 0, 0.75);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    z-index: 1000;
+    padding: 16px;
+  }
+
+  .prog-modal-box {
+    width: 100%;
+    max-width: 550px;
+    background: var(--bg-card, #1E293B);
+    border: 1px solid var(--border-color, #334155);
+    border-radius: var(--radius, 8px);
+    padding: 20px;
+  }
+
+  .form-group-prog {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    margin-bottom: 14px;
+  }
+
+  .form-group-prog label {
+    font-size: 12px;
+    color: var(--text-muted, #94A3B8);
+    font-weight: 500;
+  }
+
+  .ctrl-prog {
+    width: 100%;
+    padding: 8px 10px;
+    background: var(--bg-main, #0F172A);
+    border: 1px solid var(--border-color, #334155);
+    color: #FFFFFF;
+    border-radius: 6px;
+    font-size: 13px;
+    outline: none;
+  }
+
+  .ctrl-prog:focus {
+    border-color: var(--accent, #3B82F6);
+  }
+
+  .alloc-container {
+    background: var(--bg-main, #0F172A);
+    border: 1px solid var(--border-color, #334155);
+    border-radius: 6px;
+    padding: 12px;
+    margin-bottom: 16px;
+  }
+
+  .tbl-alloc {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 12px;
+  }
+
+  .tbl-alloc th, .tbl-alloc td {
+    padding: 6px;
+    border-bottom: 1px solid var(--border-color, #334155);
+    text-align: left;
+    color: #fff;
+  }
+
+  .tbl-alloc th {
+    color: var(--text-muted, #94A3B8);
+  }
+</style>
+
+<script>
+  window.masterProgrammes = window.masterProgrammes || [];
+  window.masterCourses = window.masterCourses || [];
+  window.tempAllocatedCourses = window.tempAllocatedCourses || [];
+
+  function renderProgrammesView() {
+    const contentPanel = document.getElementById('main-content');
+    if (!contentPanel) return;
+
+    contentPanel.innerHTML = `
+      <div class="prog-card-container">
+        <div class="prog-header-bar">
+          <h3>Programmes Portal</h3>
+          <button class="btn-accent-prog" onclick="openProgModal()"><i class="fa-solid fa-plus"></i> New Programme</button>
+        </div>
+
+        <input type="text" id="search-programme" class="search-input-prog" placeholder="Search programmes..." onkeyup="filterProgrammes()">
+
+        <div id="programme-list" class="prog-list-box">
+          <div style="text-align: center; color: var(--text-muted, #94A3B8); padding: 20px;">Loading programmes...</div>
+        </div>
+      </div>
+
+      <!-- Modal Container -->
+      <div id="programme-modal-overlay" class="prog-modal-mask" style="display: none;">
+        <div class="prog-modal-box">
+          <div class="prog-header-bar" style="margin-bottom: 12px;">
+            <h4 id="prog-modal-title" style="margin: 0; color: #fff;">Manage Programme</h4>
+            <i class="fa-solid fa-xmark" onclick="closeProgModal()" style="cursor: pointer; color: var(--text-muted, #94A3B8);"></i>
+          </div>
+
+          <input type="hidden" id="prog-row">
+          <input type="hidden" id="prog-id">
+
+          <div class="form-group-prog">
+            <label>Programme Name</label>
+            <input type="text" id="prog-name" class="ctrl-prog" placeholder="e.g. Higher Diploma in Software Engineering" required>
+          </div>
+
+          <div class="form-group-prog">
+            <label>Status</label>
+            <select id="prog-status" class="ctrl-prog">
+              <option value="Active">Active</option>
+              <option value="Inactive">Inactive</option>
+            </select>
+          </div>
+
+          <div class="alloc-container">
+            <label style="font-size: 12px; font-weight: 600; color: #fff; display: block; margin-bottom: 8px;">Allocate Courses to Programme</label>
+            
+            <div style="display: flex; gap: 8px; margin-bottom: 10px; flex-wrap: wrap;">
+              <select id="course-dropdown-selector" class="ctrl-prog" style="flex: 2; min-width: 180px;" onchange="autoFillCourseUnits()">
+                <option value="">Loading Master List Courses...</option>
+              </select>
+              <input type="number" id="course-unit-input" class="ctrl-prog" placeholder="Units" min="1" max="6" style="width: 75px;">
+              <button type="button" onclick="appendCourseToTable()" class="btn-accent-prog">Add</button>
+            </div>
+
+            <table class="tbl-alloc">
+              <thead>
+                <tr>
+                  <th>Course Name</th>
+                  <th style="width: 50px;">Unit</th>
+                  <th style="width: 90px;">Status</th>
+                  <th style="width: 30px;"></th>
+                </tr>
+              </thead>
+              <tbody id="allocated-courses-body">
+                <tr>
+                  <td colspan="4" style="text-align: center; color: var(--text-muted, #94A3B8); padding: 10px;">No courses allocated yet.</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+
+          <div style="display: flex; gap: 10px; justify-content: flex-end;">
+            <button type="button" class="btn-sec-prog" onclick="closeProgModal()">Cancel</button>
+            <button type="button" id="save-prog-btn" class="btn-accent-prog" onclick="submitProgramme()">Save Programme</button>
+          </div>
+        </div>
+      </div>
+    `;
+
+    // Fetch dynamic content
+    loadProgrammesView();
+    loadMasterCoursesList();
+  }
+
+  function loadProgrammesView() {
+    if (typeof google !== 'undefined' && google.script && google.script.run) {
+      google.script.run
+        .withSuccessHandler(renderProgrammesList)
+        .withFailureHandler(err => {
+          console.error("getProgrammesList failed:", err);
+          const listContainer = document.getElementById('programme-list');
+          if (listContainer) {
+            listContainer.innerHTML = `<div style="text-align: center; color: #EF4444; padding: 20px;">Could not load programmes. (Sheet missing or server error)</div>`;
+          }
+        })
+        .getProgrammesList();
+    } else {
+      renderProgrammesList([]);
+    }
+  }
+
+  function loadMasterCoursesList1() {
+    if (typeof google !== 'undefined' && google.script && google.script.run) {
+      google.script.run
+        .withSuccessHandler(courses => {
+          window.masterCourses = courses || [];
+          populateMasterCoursesDropdown();
+        })
+        .withFailureHandler(err => {
+          console.error("getMasterCoursesList failed:", err);
+          populateMasterCoursesDropdown();
+        })
+        .getMasterCoursesList();
+    }
+  }
+
+  function populateMasterCoursesDropdown() {
+    const select = document.getElementById('course-dropdown-selector');
+    if (!select) return;
+
+    if (!window.masterCourses || window.masterCourses.length === 0) {
+      select.innerHTML = '<option value="">No Master Courses Available</option>';
+      return;
+    }
+
+    let optionsHtml = '<option value="">Select Course from Master List...</option>';
+    window.masterCourses.forEach((c, idx) => {
+      const displayName = c.name || (c.code ? `${c.code} - ${c.title}` : c.title) || c;
+      optionsHtml += `<option value="${displayName}" data-index="${idx}">${displayName}</option>`;
+    });
+
+    select.innerHTML = optionsHtml;
+  }
+
+  function autoFillCourseUnits() {
+    const select = document.getElementById('course-dropdown-selector');
+    const unitInput = document.getElementById('course-unit-input');
+    if (!select || !unitInput) return;
+
+    const selectedOption = select.options[select.selectedIndex];
+    const courseIdx = selectedOption ? selectedOption.getAttribute('data-index') : null;
+
+    if (courseIdx !== null && window.masterCourses[courseIdx]) {
+      unitInput.value = window.masterCourses[courseIdx].defaultUnit || window.masterCourses[courseIdx].units || 3;
+    } else {
+      unitInput.value = '';
+    }
+  }
+
+  function renderProgrammesList(data) {
+    window.masterProgrammes = data || [];
+    const listContainer = document.getElementById('programme-list');
+    if (!listContainer) return;
+    
+    if (!window.masterProgrammes.length) {
+      listContainer.innerHTML = `<div style="text-align: center; color: var(--text-muted, #94A3B8); padding: 20px;">No programmes found. Click "+ New Programme" above to create one.</div>`;
+      return;
+    }
+
+    let html = '';
+    window.masterProgrammes.forEach(prog => {
+      const badgeClass = prog.status === 'Active' ? 'badge-prog-active' : 'badge-prog-inactive';
+      html += `
+        <div class="prog-card-item">
+          <div>
+            <div style="font-weight: 600; font-size: 14px; color: #fff;">${prog.name} <span style="font-size: 11px; color: var(--accent, #3B82F6);">(${prog.id || 'N/A'})</span></div>
+            <div style="color: var(--text-muted, #94A3B8); font-size: 12px; margin-top: 4px;">
+              Total Allocated Units: <strong>${prog.totalUnits || 0}</strong>
+            </div>
+          </div>
+          <div style="display: flex; align-items: center; gap: 12px;">
+            <span class="${badgeClass}">${prog.status || 'Active'}</span>
+            <i class="fa-solid fa-pen-to-square" style="color: var(--accent, #3B82F6); cursor: pointer;" onclick='openProgModal(true, ${JSON.stringify(prog)})'></i>
+          </div>
+        </div>
+      `;
+    });
+    listContainer.innerHTML = html;
+  }
+
+// Expose explicitly to window scope
+window.openProgModal = function(isEdit = false, progData = null) {
+  try {
+    const modalOverlay = document.getElementById('programme-modal-overlay');
+    if (!modalOverlay) {
+      console.error("Modal container 'programme-modal-overlay' missing from DOM.");
+      return;
+    }
+
+    // Safe helper setter
+    const setElemVal = (id, val) => {
+      const el = document.getElementById(id);
+      if (el) el.value = val;
+    };
+
+    const modalTitle = document.getElementById('prog-modal-title');
+    if (modalTitle) {
+      modalTitle.innerText = isEdit ? "Edit Programme & Curriculum" : "New Programme";
+    }
+
+    setElemVal('prog-name', isEdit && progData ? progData.name : '');
+    setElemVal('prog-status', isEdit && progData ? progData.status : 'Active');
+    setElemVal('prog-id', isEdit && progData ? progData.id : '');
+    setElemVal('prog-row', isEdit && progData ? progData.row : '');
+
+    // Refresh courses dropdown
+    if (!window.masterCourses || window.masterCourses.length === 0) {
+      if (typeof loadMasterCoursesList === 'function') loadMasterCoursesList();
+    } else {
+      if (typeof populateMasterCoursesDropdown === 'function') populateMasterCoursesDropdown();
+    }
+
+    // Handle course allocations
+    if (isEdit && progData && progData.id) {
+      if (typeof google !== 'undefined' && google.script && google.script.run) {
+        google.script.run
+          .withSuccessHandler(courses => {
+            window.tempAllocatedCourses = courses || [];
+            if (typeof renderAllocatedCoursesTable === 'function') renderAllocatedCoursesTable();
+          })
+          .getCoursesByProgrammeId(progData.id);
+      }
+    } else {
+      window.tempAllocatedCourses = [];
+      if (typeof renderAllocatedCoursesTable === 'function') renderAllocatedCoursesTable();
+    }
+
+    // Show modal
+    modalOverlay.style.display = 'flex';
+  } catch (err) {
+    console.error("Error opening programme modal:", err);
+    alert("Could not open modal: " + err.message);
+  }
+};
+
+window.closeProgModal = function() {
+  const modalOverlay = document.getElementById('programme-modal-overlay');
+  if (modalOverlay) modalOverlay.style.display = 'none';
+};
+
+
+
+  function appendCourseToTable() {
+    const select = document.getElementById('course-dropdown-selector');
+    const unitInput = document.getElementById('course-unit-input');
+    
+    const courseName = select.value;
+    const unit = unitInput.value;
+
+    if (!courseName) return alert("Please select a course from the dropdown.");
+    if (!unit || unit <= 0) return alert("Please enter a valid course unit.");
+
+    if (window.tempAllocatedCourses.some(c => c.courseName === courseName)) {
+      return alert("This course is already allocated to this programme.");
+    }
+
+    window.tempAllocatedCourses.push({
+      courseName: courseName,
+      unit: Number(unit),
+      status: "Active"
+    });
+
+    renderAllocatedCoursesTable();
+    select.value = "";
+    unitInput.value = "";
+  }
+
+  function renderAllocatedCoursesTable() {
+    const tbody = document.getElementById('allocated-courses-body');
+    if (!tbody) return;
+
+    if (!window.tempAllocatedCourses.length) {
+      tbody.innerHTML = `<tr><td colspan="4" style="text-align: center; color: var(--text-muted, #94A3B8); padding: 10px;">No courses allocated yet.</td></tr>`;
+      return;
+    }
+
+    let html = '';
+    window.tempAllocatedCourses.forEach((c, index) => {
+      html += `
+        <tr>
+          <td>${c.courseName}</td>
+          <td>${c.unit}</td>
+          <td>
+            <select onchange="window.tempAllocatedCourses[${index}].status = this.value" class="ctrl-prog" style="padding: 2px 4px; font-size: 11px;">
+              <option value="Active" ${c.status === 'Active' ? 'selected' : ''}>Active</option>
+              <option value="Inactive" ${c.status === 'Inactive' ? 'selected' : ''}>Inactive</option>
+            </select>
+          </td>
+          <td style="text-align: center;">
+            <i class="fa-solid fa-trash" onclick="removeAllocatedCourse(${index})" style="color: #EF4444; cursor: pointer;"></i>
+          </td>
+        </tr>
+      `;
+    });
+    tbody.innerHTML = html;
+  }
+
+  function removeAllocatedCourse(index) {
+    window.tempAllocatedCourses.splice(index, 1);
+    renderAllocatedCoursesTable();
+  }
+
+  function submitProgramme() {
+    const btn = document.getElementById('save-prog-btn');
+    const payload = {
+      row: document.getElementById('prog-row').value,
+      programmeId: document.getElementById('prog-id').value,
+      programmeName: document.getElementById('prog-name').value.trim(),
+      status: document.getElementById('prog-status').value,
+      courses: window.tempAllocatedCourses
+    };
+
+    if (!payload.programmeName) return alert("Programme Name is required.");
+
+    btn.disabled = true;
+    btn.innerText = "Saving...";
+
+    if (typeof google !== 'undefined' && google.script && google.script.run) {
+      google.script.run
+        .withSuccessHandler(() => {
+          btn.disabled = false;
+          btn.innerText = "Save Programme";
+          closeProgModal();
+          renderProgrammesView();
+        })
+        .withFailureHandler(err => {
+          btn.disabled = false;
+          btn.innerText = "Save Programme";
+          alert("Error: " + err.message);
+        })
+        .saveProgrammeWithCourses(payload);
+    }
+  }
+
+  function filterProgrammes() {
+    const query = document.getElementById('search-programme').value.toLowerCase();
+    const cards = document.querySelectorAll('.prog-card-item');
+    
+    cards.forEach(card => {
+      const text = card.innerText.toLowerCase();
+      card.style.display = text.includes(query) ? 'flex' : 'none';
+    });
+  }
+
+  function loadMasterCoursesList() {
+  if (typeof google !== 'undefined' && google.script && google.script.run) {
+    google.script.run
+      .withSuccessHandler(courses => {
+        window.masterCourses = courses || [];
+        populateMasterCoursesDropdown();
+      })
+      .withFailureHandler(err => {
+        console.error("Failed to fetch master courses:", err);
+      })
+      .getAllMasterCourses(); // Updated to match Code.gs name
+  }
+}
+</script>
+
+
+  <!-- ===== Courses module (was: include('Courses')) ===== -->
+<!-- Course Add/Edit Modal -->
+<div id="course-modal" style="display: none; position: fixed; top: 50%; left: 50%; transform: translate(-50%, -50%); width: 90%; max-width: 400px; background: var(--bg-card); border: 1px solid var(--border-color); border-radius: var(--radius); padding: 20px; z-index: 300;">
+  <h3 id="course-modal-title" style="margin-bottom: 14px;">Add Course</h3>
+  <input type="hidden" id="course-row">
+  <div style="display: flex; flex-direction: column; gap: 10px;">
+    <input type="text" id="course-code" placeholder="Course Code (e.g. BIB-101)" style="padding: 10px; background: var(--bg-main); border: 1px solid var(--border-color); color: #fff; border-radius: 6px;" required>
+    <input type="text" id="course-title" placeholder="Course Title" style="padding: 10px; background: var(--bg-main); border: 1px solid var(--border-color); color: #fff; border-radius: 6px;" required>
+    
+    <!-- Dynamic Programme Selector -->
+    <select id="course-programme" style="padding: 10px; background: var(--bg-main); border: 1px solid var(--border-color); color: #fff; border-radius: 6px;" required>
+      <option value="">Select Programme...</option>
+    </select>
+
+    <div style="display: flex; gap: 10px;">
+      <input type="number" id="course-units" placeholder="Credit Units" style="flex: 1; padding: 10px; background: var(--bg-main); border: 1px solid var(--border-color); color: #fff; border-radius: 6px;" required>
+      <input type="text" id="course-instructor" placeholder="Instructor" style="flex: 1; padding: 10px; background: var(--bg-main); border: 1px solid var(--border-color); color: #fff; border-radius: 6px;">
+    </div>
+    
+    <div style="display: flex; gap: 10px; margin-top: 10px;">
+      <button onclick="submitCourse()" style="flex: 1; padding: 10px; background: var(--accent); color: #fff; border: none; border-radius: 6px; font-weight: 600;">Save Course</button>
+      <button onclick="closeCourseModal()" style="flex: 1; padding: 10px; background: var(--bg-hover); color: #fff; border: none; border-radius: 6px;">Cancel</button>
+    </div>
+  </div>
+</div>
+
+<style>
+  .crs-card-container {
+    background: var(--bg-card, #1E293B);
+    border: 1px solid var(--border-color, #334155);
+    border-radius: var(--radius, 8px);
+    padding: 20px;
+    max-width: 900px;
+    margin: 0 auto;
+    box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.3);
+  }
+
+  .crs-header-bar {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 16px;
+    gap: 10px;
+  }
+
+  .crs-header-bar h3 {
+    margin: 0;
+    font-size: 18px;
+    font-weight: 600;
+    color: #FFFFFF;
+  }
+
+  .btn-accent-crs {
+    padding: 8px 14px;
+    background: var(--accent, #3B82F6);
+    color: #FFFFFF;
+    border: none;
+    border-radius: 6px;
+    font-size: 13px;
+    font-weight: 600;
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    cursor: pointer;
+  }
+
+  .btn-accent-crs:hover {
+    background: var(--accent-hover, #2563EB);
+  }
+
+  .btn-sec-crs {
+    padding: 8px 14px;
+    background: var(--bg-hover, #334155);
+    color: #FFFFFF;
+    border: 1px solid var(--border-color, #334155);
+    border-radius: 6px;
+    font-size: 13px;
+    cursor: pointer;
+  }
+
+  .search-input-crs {
+    width: 100%;
+    padding: 10px 12px;
+    background: var(--bg-main, #0F172A);
+    border: 1px solid var(--border-color, #334155);
+    color: #FFFFFF;
+    border-radius: 6px;
+    font-size: 13px;
+    margin-bottom: 16px;
+    outline: none;
+  }
+
+  .search-input-crs:focus {
+    border-color: var(--accent, #3B82F6);
+  }
+
+  .tbl-crs {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 13px;
+    text-align: left;
+  }
+
+  .tbl-crs th, .tbl-crs td {
+    padding: 12px 10px;
+    border-bottom: 1px solid var(--border-color, #334155);
+  }
+
+  .tbl-crs th {
+    background: var(--bg-main, #0F172A);
+    color: var(--text-muted, #94A3B8);
+    font-weight: 600;
+  }
+
+  .tbl-crs td {
+    color: #FFFFFF;
+  }
+
+  .badge-crs-active {
+    background: rgba(16, 185, 129, 0.15);
+    color: #10B981;
+    padding: 3px 8px;
+    border-radius: 4px;
+    font-size: 11px;
+    font-weight: 600;
+  }
+
+  .badge-crs-inactive {
+    background: rgba(239, 68, 68, 0.15);
+    color: #EF4444;
+    padding: 3px 8px;
+    border-radius: 4px;
+    font-size: 11px;
+    font-weight: 600;
+  }
+
+  .crs-modal-mask {
+    position: fixed;
+    top: 0; left: 0; right: 0; bottom: 0;
+    background: rgba(0, 0, 0, 0.75);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    z-index: 1000;
+    padding: 16px;
+  }
+
+  .crs-modal-box {
+    width: 100%;
+    max-width: 480px;
+    background: var(--bg-card, #1E293B);
+    border: 1px solid var(--border-color, #334155);
+    border-radius: var(--radius, 8px);
+    padding: 20px;
+  }
+
+  .form-group-crs {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    margin-bottom: 14px;
+  }
+
+  .form-group-crs label {
+    font-size: 12px;
+    color: var(--text-muted, #94A3B8);
+    font-weight: 500;
+  }
+
+  .ctrl-crs {
+    width: 100%;
+    padding: 10px;
+    background: var(--bg-main, #0F172A);
+    border: 1px solid var(--border-color, #334155);
+    color: #FFFFFF;
+    border-radius: 6px;
+    font-size: 13px;
+    outline: none;
+  }
+
+  .ctrl-crs:focus {
+    border-color: var(--accent, #3B82F6);
+  }
+</style>
+
+<script>
+  window.allMasterCourses = window.allMasterCourses || [];
+
+  function renderCoursesView() {
+    const contentPanel = document.getElementById('main-content');
+    if (!contentPanel) return;
+
+    contentPanel.innerHTML = `
+      <div class="crs-card-container">
+        <div class="crs-header-bar">
+          <h3>Master Courses Catalog</h3>
+          <button class="btn-accent-crs" onclick="openCourseModal()"><i class="fa-solid fa-plus"></i> New Course</button>
+        </div>
+
+        <input type="text" id="search-course" class="search-input-crs" placeholder="Search course by code or title..." onkeyup="filterCoursesTable()">
+
+        <div style="overflow-x: auto;">
+          <table class="tbl-crs">
+            <thead>
+              <tr>
+                <th style="width: 120px;">Course Code</th>
+                <th>Course Title</th>
+                <th style="width: 70px;">Units</th>
+                <th>Department</th>
+                <th style="width: 90px;">Status</th>
+                <th style="width: 40px;"></th>
+              </tr>
+            </thead>
+            <tbody id="courses-table-body">
+              <tr>
+                <td colspan="6" style="text-align: center; color: var(--text-muted, #94A3B8); padding: 20px;">Loading catalog...</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      <!-- Course Modal -->
+      <div id="course-modal-overlay" class="crs-modal-mask" style="display: none;">
+        <div class="crs-modal-box">
+          <div class="crs-header-bar" style="margin-bottom: 12px;">
+            <h4 id="crs-modal-title" style="margin: 0; color: #fff;">Course Entry</h4>
+            <i class="fa-solid fa-xmark" onclick="closeCourseModal()" style="cursor: pointer; color: var(--text-muted, #94A3B8);"></i>
+          </div>
+
+          <input type="hidden" id="crs-row">
+          <input type="hidden" id="crs-id">
+
+          <div style="display: flex; gap: 10px;">
+            <div class="form-group-crs" style="flex: 2;">
+              <label>Course Code</label>
+              <input type="text" id="crs-code" class="ctrl-crs" placeholder="e.g. GST 101" required>
+            </div>
+            <div class="form-group-crs" style="flex: 1;">
+              <label>Default Units</label>
+              <input type="number" id="crs-units" class="ctrl-crs" min="1" max="6" value="3" required>
+            </div>
+          </div>
+
+          <div class="form-group-crs">
+            <label>Course Title</label>
+            <input type="text" id="crs-title" class="ctrl-crs" placeholder="e.g. Use of English & Communication" required>
+          </div>
+
+          <div class="form-group-crs">
+            <label>Department / Faculty</label>
+            <input type="text" id="crs-dept" class="ctrl-crs" placeholder="e.g. General Studies">
+          </div>
+
+          <div class="form-group-crs">
+            <label>Status</label>
+            <select id="crs-status" class="ctrl-crs">
+              <option value="Active">Active</option>
+              <option value="Inactive">Inactive</option>
+            </select>
+          </div>
+
+          <div style="display: flex; gap: 10px; justify-content: flex-end; margin-top: 10px;">
+            <button type="button" class="btn-sec-crs" onclick="closeCourseModal()">Cancel</button>
+            <button type="button" id="save-crs-btn" class="btn-accent-crs" onclick="submitCourse()">Save Course</button>
+          </div>
+        </div>
+      </div>
+    `;
+
+    loadCoursesTable();
+  }
+
+  function loadCoursesTable() {
+    if (typeof google !== 'undefined' && google.script && google.script.run) {
+      google.script.run
+        .withSuccessHandler(renderCoursesTableData)
+        .withFailureHandler(err => {
+          const tbody = document.getElementById('courses-table-body');
+          if (tbody) tbody.innerHTML = `<tr><td colspan="6" style="text-align: center; color: #EF4444; padding: 20px;">Error: ${err.message}</td></tr>`;
+        })
+        .getAllMasterCourses();
+    }
+  }
+
+  function renderCoursesTableData(courses) {
+    window.allMasterCourses = courses || [];
+    const tbody = document.getElementById('courses-table-body');
+    if (!tbody) return;
+
+    if (!window.allMasterCourses.length) {
+      tbody.innerHTML = `<tr><td colspan="6" style="text-align: center; color: var(--text-muted, #94A3B8); padding: 20px;">No master courses found. Add your first course above!</td></tr>`;
+      return;
+    }
+
+    let html = '';
+    window.allMasterCourses.forEach((c) => {
+      const badge = c.status === 'Active' ? 'badge-crs-active' : 'badge-crs-inactive';
+      html += `
+        <tr>
+          <td><strong>${c.code || ' '}</strong></td>
+          <td>${c.title}</td>
+          <td>${c.units}</td>
+          <td style="color: var(--text-muted, #94A3B8);">${c.department || 'General'}</td>
+          <td><span class="${badge}">${c.status}</span></td>
+          <td style="text-align: center;">
+            <i class="fa-solid fa-pen-to-square" style="color: var(--accent, #3B82F6); cursor: pointer;" onclick='openCourseModal(true, ${JSON.stringify(c)})'></i>
+          </td>
+        </tr>
+      `;
+    });
+    tbody.innerHTML = html;
+  }
+
+  function openCourseModal(isEdit = false, cData = null) {
+    const modal = document.getElementById('course-modal-overlay');
+    document.getElementById('crs-modal-title').innerText = isEdit ? "Edit Master Course" : "New Master Course";
+    document.getElementById('crs-row').value = isEdit ? cData.row : '';
+    document.getElementById('crs-id').value = isEdit ? cData.id : '';
+    document.getElementById('crs-code').value = isEdit ? cData.code : '';
+    document.getElementById('crs-title').value = isEdit ? cData.title : '';
+    document.getElementById('crs-units').value = isEdit ? cData.units : 3;
+    document.getElementById('crs-dept').value = isEdit ? cData.department : '';
+    document.getElementById('crs-status').value = isEdit ? cData.status : 'Active';
+
+    if (modal) modal.style.display = 'flex';
+  }
+
+  function closeCourseModal() {
+    const modal = document.getElementById('course-modal-overlay');
+    if (modal) modal.style.display = 'none';
+  }
+
+  function submitCourse() {
+    const btn = document.getElementById('save-crs-btn');
+    const payload = {
+      row: document.getElementById('crs-row').value,
+      id: document.getElementById('crs-id').value,
+      code: document.getElementById('crs-code').value.trim(),
+      title: document.getElementById('crs-title').value.trim(),
+      units: document.getElementById('crs-units').value,
+      department: document.getElementById('crs-dept').value.trim(),
+      status: document.getElementById('crs-status').value
+    };
+
+    if (!payload.title) return alert("Course Title is required.");
+    if (!payload.units || payload.units <= 0) return alert("Valid Units are required.");
+
+    btn.disabled = true;
+    btn.innerText = "Saving...";
+
+    google.script.run
+      .withSuccessHandler(() => {
+        btn.disabled = false;
+        btn.innerText = "Save Course";
+        closeCourseModal();
+        renderCoursesView();
+      })
+      .withFailureHandler(err => {
+        btn.disabled = false;
+        btn.innerText = "Save Course";
+        alert("Error saving course: " + err.message);
+      })
+      .saveMasterCourse(payload);
+  }
+
+  function filterCoursesTable() {
+    const query = document.getElementById('search-course').value.toLowerCase();
+    const rows = document.querySelectorAll('#courses-table-body tr');
+
+    rows.forEach(row => {
+      const text = row.innerText.toLowerCase();
+      row.style.display = text.includes(query) ? '' : 'none';
+    });
+  }
+</script>
+
+
+
+  <!-- ===== Cohorts module (was: include('Cohorts')) ===== -->
+
+<!-- Cohort Add/Edit Modal -->
+<div id="cohort-modal" style="display: none; position: fixed; top: 50%; left: 50%; transform: translate(-50%, -50%); width: 90%; max-width: 400px; background: var(--bg-card); border: 1px solid var(--border-color); border-radius: var(--radius); padding: 20px; z-index: 300;">
+  <h3 id="cohort-modal-title" style="margin-bottom: 14px;">Add Cohort</h3>
+  <input type="hidden" id="cohort-row">
+  <div style="display: flex; flex-direction: column; gap: 10px;">
+    <input type="text" id="cohort-name" placeholder="Cohort Name (e.g. DTH 2025/2026 Alpha)" style="padding: 10px; background: var(--bg-main); border: 1px solid var(--border-color); color: #fff; border-radius: 6px;" required>
+    
+    <div style="display: flex; gap: 10px;">
+      <input type="text" id="cohort-session" placeholder="Session (e.g. 2025/2026)" style="flex: 1; padding: 10px; background: var(--bg-main); border: 1px solid var(--border-color); color: #fff; border-radius: 6px;" required>
+      <input type="number" id="cohort-year" placeholder="Year (e.g. 2025)" style="flex: 1; padding: 10px; background: var(--bg-main); border: 1px solid var(--border-color); color: #fff; border-radius: 6px;" required>
+    </div>
+
+    <!-- Dynamic Programme Selector -->
+    <select id="cohort-programme" style="padding: 10px; background: var(--bg-main); border: 1px solid var(--border-color); color: #fff; border-radius: 6px;" required>
+      <option value="">Select Programme...</option>
+    </select>
+    
+    <div style="display: flex; gap: 10px; margin-top: 10px;">
+      <button onclick="submitCohort()" style="flex: 1; padding: 10px; background: var(--accent); color: #fff; border: none; border-radius: 6px; font-weight: 600;">Save Cohort</button>
+      <button onclick="closeCohortModal()" style="flex: 1; padding: 10px; background: var(--bg-hover); color: #fff; border: none; border-radius: 6px;">Cancel</button>
+    </div>
+  </div>
+</div>
+
+<script>
+// Render Cohorts View
+function renderCohortsView() {
+  const contentPanel = document.getElementById('main-content');
+  contentPanel.innerHTML = `
+    <div class="module-card">
+      <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 14px;">
+        <h3>Cohorts</h3>
+        <button onclick="openCohortModal()" style="padding: 8px 12px; background: var(--accent); color: #fff; border: none; border-radius: 6px; font-size: 12px; font-weight: 600; display: flex; align-items: center; gap: 6px;">
+          <i class="fa-solid fa-plus"></i> Add Cohort
+        </button>
+      </div>
+      <div id="cohort-list" style="display: flex; flex-direction: column; gap: 10px;">
+        <p style="color: var(--text-muted); text-align: center; padding: 16px;">Loading cohorts...</p>
+      </div>
+    </div>
+  `;
+
+  google.script.run
+    .withSuccessHandler(data => {
+      const container = document.getElementById('cohort-list');
+      if (!data.length) {
+        container.innerHTML = `<p style="color: var(--text-muted); text-align: center;">No cohorts created yet.</p>`;
+        return;
+      }
+
+      let html = '';
+      data.forEach(item => {
+        html += `
+          <div style="background: var(--bg-main); border: 1px solid var(--border-color); border-radius: 8px; padding: 12px; display: flex; justify-content: space-between; align-items: center;">
+            <div>
+              <div style="font-weight: 600; font-size: 14px;">${item.name}</div>
+              <div style="color: var(--text-muted); font-size: 11px; margin-top: 4px;">Prog: ${item.programme} | Session: ${item.session} | Year: ${item.year}</div>
+            </div>
+            <div style="display: flex; gap: 8px;">
+              <button onclick='openCohortModal(${JSON.stringify(item)})' style="background: none; border: none; color: var(--accent); cursor: pointer;"><i class="fa-solid fa-pen-to-square"></i></button>
+              <button onclick="removeCohort(${item.row})" style="background: none; border: none; color: #EF4444; cursor: pointer;"><i class="fa-solid fa-trash"></i></button>
+            </div>
+          </div>
+        `;
+      });
+      container.innerHTML = html;
+    })
+    .getCohorts();
+}
+
+// Modal Handlers
+function openCohortModal(item = null) {
+  document.getElementById('cohort-modal-title').innerText = item ? "Edit Cohort" : "Add Cohort";
+  document.getElementById('cohort-row').value = item ? item.row : "";
+  document.getElementById('cohort-name').value = item ? item.name : "";
+  document.getElementById('cohort-session').value = item ? item.session : "";
+  document.getElementById('cohort-year').value = item ? item.year : "";
+
+  // Fetch available programmes to populate select dropdown dynamically
+  google.script.run
+    .withSuccessHandler(programmes => {
+      const select = document.getElementById('cohort-programme');
+      select.innerHTML = '<option value="">Select Programme...</option>';
+      programmes.forEach(p => {
+        const selected = (item && item.programme === p.name) ? 'selected' : '';
+        select.innerHTML += `<option value="${p.name}" ${selected}>${p.name}</option>`;
+      });
+    })
+    .getProgrammes();
+
+  document.getElementById('modal-overlay').classList.add('active');
+  document.getElementById('cohort-modal').style.display = 'block';
+}
+
+function closeCohortModal() {
+  document.getElementById('modal-overlay').classList.remove('active');
+  document.getElementById('cohort-modal').style.display = 'none';
+}
+
+// CRUD Operations
+function submitCohort() {
+  const form = {
+    row: document.getElementById('cohort-row').value,
+    name: document.getElementById('cohort-name').value,
+    session: document.getElementById('cohort-session').value,
+    year: document.getElementById('cohort-year').value,
+    programme: document.getElementById('cohort-programme').value
+  };
+
+  if (!form.name || !form.session || !form.programme) {
+    return alert("Cohort Name, Session, and Programme are required.");
+  }
+
+  closeCohortModal();
+  google.script.run
+    .withSuccessHandler(() => renderCohortsView())
+    .saveCohort(form);
+}
+
+function removeCohort(row) {
+  if (confirm("Are you sure you want to delete this cohort?")) {
+    google.script.run
+      .withSuccessHandler(() => renderCohortsView())
+      .deleteCohort(row);
+  }
+}
+</script>
+
+
+
+  <!-- ===== Students module (was: include('Students')) ===== -->
+
+
+<div id="student-modal" style="display: none; position: fixed; top: 50%; left: 50%; transform: translate(-50%, -50%); width: 90%; max-width: 420px; background: var(--bg-card); border: 1px solid var(--border-color); border-radius: var(--radius); padding: 20px; z-index: 300; max-height: 90vh; overflow-y: auto;">
+  <h3 id="student-modal-title" style="margin-bottom: 14px;">Register Student</h3>
+  <input type="hidden" id="student-row">
+  <input type="hidden" id="student-existing-passport">
+  
+  <div style="display: flex; flex-direction: column; gap: 10px;">
+    <input type="text" id="student-id" placeholder="Student ID (Auto-generated if blank)" style="padding: 10px; background: var(--bg-main); border: 1px solid var(--border-color); color: #fff; border-radius: 6px;">
+    <input type="text" id="student-name" placeholder="Full Name" style="padding: 10px; background: var(--bg-main); border: 1px solid var(--border-color); color: #fff; border-radius: 6px;" required>
+    
+    <div style="display: flex; gap: 10px;">
+      <select id="student-gender" style="flex: 1; padding: 10px; background: var(--bg-main); border: 1px solid var(--border-color); color: #fff; border-radius: 6px;" required>
+        <option value="">Gender...</option>
+        <option value="Male">Male</option>
+        <option value="Female">Female</option>
+      </select>
+
+      <select id="student-status" style="flex: 1; padding: 10px; background: var(--bg-main); border: 1px solid var(--border-color); color: #fff; border-radius: 6px;">
+        <option value="Active">Active</option>
+        <option value="Graduated">Graduated</option>
+        <option value="Suspended">Suspended</option>
+      </select>
+    </div>
+
+    <input type="email" id="student-email" placeholder="Email Address" style="padding: 10px; background: var(--bg-main); border: 1px solid var(--border-color); color: #fff; border-radius: 6px;">
+    <input type="tel" id="student-phone" placeholder="Phone Number" style="padding: 10px; background: var(--bg-main); border: 1px solid var(--border-color); color: #fff; border-radius: 6px;">
+    
+    <div style="display: flex; flex-direction: column; gap: 4px;">
+      <label style="font-size: 11px; color: var(--text-muted);">Passport Photo</label>
+      <input type="file" id="student-photo-file" accept="image/*" style="padding: 8px; background: var(--bg-main); border: 1px solid var(--border-color); color: #fff; border-radius: 6px; font-size: 12px;">
+    </div>
+    
+    <div style="display: flex; gap: 10px; margin-top: 10px;">
+      <button id="save-btn" onclick="submitStudent()" style="flex: 1; padding: 10px; background: var(--accent); color: #fff; border: none; border-radius: 6px; font-weight: 600;">Save Student</button>
+      <button onclick="closeStudentModal()" style="flex: 1; padding: 10px; background: var(--bg-hover); color: #fff; border: none; border-radius: 6px;">Cancel</button>
+    </div>
+  </div>
+</div>
+
+<script>
+let allStudentsData = [];
+
+function renderStudentsView() {
+  const contentPanel = document.getElementById('main-content');
+  contentPanel.innerHTML = `
+    <div class="module-card">
+      <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 14px; gap: 10px; flex-wrap: wrap;">
+        <h3>Student Profiles</h3>
+        <button onclick="openStudentModal()" style="padding: 8px 12px; background: var(--accent); color: #fff; border: none; border-radius: 6px; font-size: 12px; font-weight: 600; display: flex; align-items: center; gap: 6px;">
+          <i class="fa-solid fa-user-plus"></i> Register Student
+        </button>
+      </div>
+
+      <div style="margin-bottom: 14px;">
+        <input type="text" id="student-search-input" onkeyup="filterStudents()" placeholder="Search by Student ID, Name, or Phone..." style="width: 100%; padding: 10px 12px; background: var(--bg-main); border: 1px solid var(--border-color); color: #fff; border-radius: 6px; font-size: 13px;">
+      </div>
+
+      <div id="student-list" style="display: flex; flex-direction: column; gap: 10px;">
+        <p style="color: var(--text-muted); text-align: center; padding: 16px;">Loading student profiles...</p>
+      </div>
+    </div>
+  `;
+
+  google.script.run
+    .withSuccessHandler(data => {
+      allStudentsData = data || [];
+      displayStudentCards(allStudentsData);
+    })
+    .withFailureHandler(err => {
+      document.getElementById('student-list').innerHTML = `<p style="color: #EF4444; text-align: center;">Error: ${err.message}</p>`;
+    })
+    .getStudents();
+}
+
+function displayStudentCards(data) {
+  const container = document.getElementById('student-list');
+  if (!data.length) {
+    container.innerHTML = `<p style="color: var(--text-muted); text-align: center;">No student profiles registered.</p>`;
+    return;
+  }
+
+  let html = '';
+  data.forEach(item => {
+    html += `
+      <div style="background: var(--bg-main); border: 1px solid var(--border-color); border-radius: 8px; padding: 12px; display: flex; align-items: center; justify-content: space-between; gap: 10px;">
+        <div style="display: flex; align-items: center; gap: 12px;">
+          <img src="${item.passport}" style="width: 46px; height: 46px; border-radius: 50%; object-fit: cover; border: 2px solid var(--accent);" onError="this.src='https://via.placeholder.com/150'">
+          <div>
+            <div style="font-weight: 600; font-size: 14px;">${item.name} <span style="font-size: 10px; padding: 2px 6px; border-radius: 4px; background: var(--bg-hover); color: var(--accent); margin-left: 4px;">${item.status}</span></div>
+            <div style="color: var(--accent); font-weight: 600; font-size: 12px; margin-top: 2px;">ID: ${item.id}</div>
+            <div style="color: var(--text-muted); font-size: 11px;">Email: ${item.email || 'N/A'} | Phone: ${item.phone || 'N/A'}</div>
+          </div>
+        </div>
+        <div style="display: flex; gap: 8px;">
+          <button onclick='openStudentModal(${JSON.stringify(item)})' style="background: none; border: none; color: var(--accent); cursor: pointer;"><i class="fa-solid fa-pen-to-square"></i></button>
+          <button onclick="removeStudent(${item.row})" style="background: none; border: none; color: #EF4444; cursor: pointer;"><i class="fa-solid fa-trash"></i></button>
+        </div>
+      </div>
+    `;
+  });
+  container.innerHTML = html;
+}
+
+function filterStudents() {
+  const query = document.getElementById('student-search-input').value.toLowerCase().trim();
+  const filtered = allStudentsData.filter(item => 
+    item.id.toLowerCase().includes(query) ||
+    item.name.toLowerCase().includes(query) ||
+    item.phone.toLowerCase().includes(query)
+  );
+  displayStudentCards(filtered);
+}
+
+function openStudentModal(item = null) {
+  document.getElementById('student-modal-title').innerText = item ? "Edit Student Profile" : "Register Student";
+  document.getElementById('student-row').value = item ? item.row : "";
+  document.getElementById('student-id').value = item ? item.id : "";
+  document.getElementById('student-name').value = item ? item.name : "";
+  document.getElementById('student-gender').value = item ? item.gender : "";
+  document.getElementById('student-status').value = item ? item.status : "Active";
+  document.getElementById('student-email').value = item ? item.email : "";
+  document.getElementById('student-phone').value = item ? item.phone : "";
+  document.getElementById('student-existing-passport').value = item ? item.passport : "";
+  document.getElementById('student-photo-file').value = "";
+
+  document.getElementById('modal-overlay').classList.add('active');
+  document.getElementById('student-modal').style.display = 'block';
+}
+
+function closeStudentModal() {
+  document.getElementById('modal-overlay').classList.remove('active');
+  document.getElementById('student-modal').style.display = 'none';
+}
+
+function compressAndConvertImage(file, maxWidth, maxHeight, callback) {
+  const reader = new FileReader();
+  reader.readAsDataURL(file);
+  reader.onload = function (event) {
+    const img = new Image();
+    img.src = event.target.result;
+    img.onload = function () {
+      let width = img.width;
+      let height = img.height;
+      if (width > height) {
+        if (width > maxWidth) { height = Math.round((height * maxWidth) / width); width = maxWidth; }
+      } else {
+        if (height > maxHeight) { width = Math.round((width * maxHeight) / height); height = maxHeight; }
+      }
+      const canvas = document.createElement('canvas');
+      canvas.width = width; canvas.height = height;
+      const ctx = canvas.getContext('2d');
+      ctx.drawImage(img, 0, 0, width, height);
+      callback(canvas.toDataURL('image/jpeg', 0.7));
+    };
+  };
+}
+
+function submitStudent() {
+  const saveBtn = document.getElementById('save-btn');
+  const fileInput = document.getElementById('student-photo-file');
+  
+  const form = {
+    row: document.getElementById('student-row').value,
+    id: document.getElementById('student-id').value,
+    name: document.getElementById('student-name').value,
+    gender: document.getElementById('student-gender').value,
+    status: document.getElementById('student-status').value,
+    email: document.getElementById('student-email').value,
+    phone: document.getElementById('student-phone').value,
+    existingPassport: document.getElementById('student-existing-passport').value,
+    passportDataUri: null
+  };
+
+  if (!form.name) return alert("Full Name is required.");
+
+  saveBtn.disabled = true;
+  saveBtn.innerText = "Saving Profile...";
+
+  if (fileInput.files.length > 0) {
+    compressAndConvertImage(fileInput.files[0], 200, 200, function (base64Uri) {
+      form.passportDataUri = base64Uri;
+      executeSave(form, saveBtn);
+    });
+  } else {
+    executeSave(form, saveBtn);
+  }
+}
+
+function executeSave(form, saveBtn) {
+  google.script.run
+    .withSuccessHandler(() => {
+      saveBtn.disabled = false;
+      saveBtn.innerText = "Save Student";
+      closeStudentModal();
+      renderStudentsView();
+    })
+    .withFailureHandler(err => {
+      saveBtn.disabled = false;
+      saveBtn.innerText = "Save Student";
+      alert("Error saving: " + err.message);
+    })
+    .saveStudent(form);
+}
+
+function removeStudent(row) {
+  if (confirm("Are you sure you want to delete this student profile?")) {
+    google.script.run
+      .withSuccessHandler(() => renderStudentsView())
+      .deleteStudent(row);
+  }
+}
+</script>
+
+  <!-- ===== Enrolment module (was: include('Enrolment')) ===== -->
+<!-- Enrolment Modal -->
+<div id="enrolment-modal" style="display: none; position: fixed; top: 50%; left: 50%; transform: translate(-50%, -50%); width: 90%; max-width: 440px; background: var(--bg-card); border: 1px solid var(--border-color); border-radius: var(--radius); padding: 20px; z-index: 300;">
+  <h3 id="enrolment-modal-title" style="margin-bottom: 14px;">Enrol Student</h3>
+  <input type="hidden" id="enrolment-row">
+  <input type="hidden" id="enrolment-id">
+  
+  <div style="display: flex; flex-direction: column; gap: 12px;">
+    <div>
+      <label style="font-size: 11px; color: var(--text-muted); display: block; margin-bottom: 4px;">Select Student</label>
+      <select id="enrolment-student-id" style="width: 100%; padding: 10px; background: var(--bg-main); border: 1px solid var(--border-color); color: #fff; border-radius: 6px;" required>
+        <option value="">Select Student...</option>
+      </select>
+    </div>
+
+    <div>
+      <label style="font-size: 11px; color: var(--text-muted); display: block; margin-bottom: 4px;">Select Programme</label>
+      <select id="enrolment-programme" style="width: 100%; padding: 10px; background: var(--bg-main); border: 1px solid var(--border-color); color: #fff; border-radius: 6px;" required>
+        <option value="">Select Programme...</option>
+      </select>
+    </div>
+
+    <div>
+      <label style="font-size: 11px; color: var(--text-muted); display: block; margin-bottom: 4px;">Select Cohort</label>
+      <select id="enrolment-cohort" style="width: 100%; padding: 10px; background: var(--bg-main); border: 1px solid var(--border-color); color: #fff; border-radius: 6px;" required>
+        <option value="">Select Cohort...</option>
+      </select>
+    </div>
+
+    <div>
+      <label style="font-size: 11px; color: var(--text-muted); display: block; margin-bottom: 4px;">Enrolment Status</label>
+      <select id="enrolment-status" style="width: 100%; padding: 10px; background: var(--bg-main); border: 1px solid var(--border-color); color: #fff; border-radius: 6px;">
+        <option value="Enrolled">Enrolled</option>
+        <option value="Completed">Completed</option>
+        <option value="Dropped">Dropped</option>
+      </select>
+    </div>
+
+    <div style="display: flex; gap: 10px; margin-top: 10px;">
+      <button id="save-enrol-btn" onclick="submitEnrolment()" style="flex: 1; padding: 10px; background: var(--accent); color: #fff; border: none; border-radius: 6px; font-weight: 600;">Save Enrolment</button>
+      <button onclick="closeEnrolmentModal()" style="flex: 1; padding: 10px; background: var(--bg-hover); color: #fff; border: none; border-radius: 6px;">Cancel</button>
+    </div>
+  </div>
+</div>
+
+<script>
+let allEnrolmentsData = [];
+
+function renderEnrolmentView() {
+  const contentPanel = document.getElementById('main-content');
+  contentPanel.innerHTML = `
+    <div class="module-card">
+      <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 14px; gap: 10px; flex-wrap: wrap;">
+        <h3>Academic Enrolments</h3>
+        <button onclick="openEnrolmentModal()" style="padding: 8px 12px; background: var(--accent); color: #fff; border: none; border-radius: 6px; font-size: 12px; font-weight: 600; display: flex; align-items: center; gap: 6px;">
+          <i class="fa-solid fa-plus"></i> New Enrolment
+        </button>
+      </div>
+
+      <div style="margin-bottom: 14px;">
+        <input type="text" id="enrolment-search-input" onkeyup="filterEnrolments()" placeholder="Search by Student ID, Name, Programme, or Cohort..." style="width: 100%; padding: 10px 12px; background: var(--bg-main); border: 1px solid var(--border-color); color: #fff; border-radius: 6px; font-size: 13px;">
+      </div>
+
+      <div id="enrolment-list" style="display: flex; flex-direction: column; gap: 10px;">
+        <p style="color: var(--text-muted); text-align: center; padding: 16px;">Loading enrolments...</p>
+      </div>
+    </div>
+  `;
+
+  loadEnrolmentListData();
+}
+
+function loadEnrolmentListData() {
+  google.script.run
+    .withSuccessHandler(data => {
+      allEnrolmentsData = data || [];
+      displayEnrolmentCards(allEnrolmentsData);
+    })
+    .withFailureHandler(err => {
+      document.getElementById('enrolment-list').innerHTML = `<p style="color: #EF4444; text-align: center;">Error loading enrolments: ${err.message}</p>`;
+    })
+    .getEnrolments();
+}
+
+function displayEnrolmentCards(data) {
+  const container = document.getElementById('enrolment-list');
+  if (!data.length) {
+    container.innerHTML = `<p style="color: var(--text-muted); text-align: center;">No active enrolments found.</p>`;
+    return;
+  }
+
+  let html = '';
+  data.forEach(item => {
+    html += `
+      <div style="background: var(--bg-main); border: 1px solid var(--border-color); border-radius: 8px; padding: 12px; display: flex; align-items: center; justify-content: space-between; gap: 10px;">
+        <div style="display: flex; align-items: center; gap: 12px;">
+          <img src="${item.passport}" style="width: 44px; height: 44px; border-radius: 50%; object-fit: cover; border: 2px solid var(--accent);" onError="this.src='https://via.placeholder.com/150'">
+          <div>
+            <div style="font-weight: 600; font-size: 14px;">${item.studentName} <span style="font-size: 10px; padding: 2px 6px; border-radius: 4px; background: var(--bg-hover); color: var(--accent); margin-left: 4px;">${item.status}</span></div>
+            <div style="color: var(--accent); font-weight: 500; font-size: 12px; margin-top: 2px;">${item.programme} &bull; <span style="color: var(--text-muted);">${item.cohort}</span></div>
+            <div style="color: var(--text-muted); font-size: 11px;">ID: ${item.studentId} | Ref: ${item.enrolmentId}</div>
+          </div>
+        </div>
+        <div>
+          <button onclick='openEnrolmentModal(${JSON.stringify(item)})' style="background: none; border: none; color: var(--accent); cursor: pointer;"><i class="fa-solid fa-pen-to-square"></i></button>
+        </div>
+      </div>
+    `;
+  });
+  container.innerHTML = html;
+}
+
+function openEnrolmentModal(item = null) {
+  const modal = document.getElementById('enrolment-modal');
+  document.getElementById('enrolment-modal-title').innerText = item ? "Edit Enrolment" : "New Enrolment";
+  document.getElementById('enrolment-row').value = item ? item.row : "";
+  document.getElementById('enrolment-id').value = item ? item.enrolmentId : "";
+
+  // Fetch options dynamically to populate dropdowns
+  google.script.run
+    .withSuccessHandler(options => {
+      // Populate Students
+      const studentSelect = document.getElementById('enrolment-student-id');
+      studentSelect.innerHTML = '<option value="">Select Student...</option>';
+      options.students.forEach(s => {
+        studentSelect.innerHTML += `<option value="${s.id}">${s.name} (${s.id})</option>`;
+      });
+      if (item) studentSelect.value = item.studentId;
+
+      // Populate Programmes
+      const progSelect = document.getElementById('enrolment-programme');
+      progSelect.innerHTML = '<option value="">Select Programme...</option>';
+      options.programmes.forEach(p => {
+        progSelect.innerHTML += `<option value="${p}">${p}</option>`;
+      });
+      if (item) progSelect.value = item.programme;
+
+      // Populate Cohorts
+      const cohortSelect = document.getElementById('enrolment-cohort');
+      cohortSelect.innerHTML = '<option value="">Select Cohort...</option>';
+      options.cohorts.forEach(c => {
+        cohortSelect.innerHTML += `<option value="${c}">${c}</option>`;
+      });
+      if (item) cohortSelect.value = item.cohort;
+
+      if (item) document.getElementById('enrolment-status').value = item.status;
+
+      document.getElementById('modal-overlay').classList.add('active');
+      modal.style.display = 'block';
+    })
+    .getEnrolmentFormData();
+}
+
+function closeEnrolmentModal() {
+  document.getElementById('modal-overlay').classList.remove('active');
+  document.getElementById('enrolment-modal').style.display = 'none';
+}
+
+function submitEnrolment() {
+  const btn = document.getElementById('save-enrol-btn');
+  const form = {
+    row: document.getElementById('enrolment-row').value,
+    enrolmentId: document.getElementById('enrolment-id').value,
+    studentId: document.getElementById('enrolment-student-id').value,
+    programme: document.getElementById('enrolment-programme').value,
+    cohort: document.getElementById('enrolment-cohort').value,
+    status: document.getElementById('enrolment-status').value
+  };
+
+  if (!form.studentId || !form.programme || !form.cohort) {
+    return alert("Student, Programme, and Cohort are required.");
+  }
+
+  btn.disabled = true;
+  btn.innerText = "Saving...";
+
+  google.script.run
+    .withSuccessHandler(() => {
+      btn.disabled = false;
+      btn.innerText = "Save Enrolment";
+      closeEnrolmentModal();
+      renderEnrolmentView();
+    })
+    .withFailureHandler(err => {
+      btn.disabled = false;
+      btn.innerText = "Save Enrolment";
+      alert("Error: " + err.message);
+    })
+    .saveEnrolment(form);
+}
+
+function filterEnrolments() {
+  const query = document.getElementById('enrolment-search-input').value.toLowerCase().trim();
+  const filtered = allEnrolmentsData.filter(item => 
+    item.studentId.toLowerCase().includes(query) ||
+    item.studentName.toLowerCase().includes(query) ||
+    item.programme.toLowerCase().includes(query) ||
+    item.cohort.toLowerCase().includes(query)
+  );
+  displayEnrolmentCards(filtered);
+}
+</script>
+
+
+
+  <!-- ===== Assessment module (was: include('Assessment')) ===== -->
+<!-- Assessment Modal -->
+<div id="assessment-modal" style="display: none; position: fixed; top: 50%; left: 50%; transform: translate(-50%, -50%); width: 90%; max-width: 450px; background: var(--bg-card); border: 1px solid var(--border-color); border-radius: var(--radius); padding: 20px; z-index: 300;">
+  <h3 id="assessment-modal-title" style="margin-bottom: 14px;">Record Assessment</h3>
+  <input type="hidden" id="asm-row">
+  <input type="hidden" id="asm-id">
+
+  <div style="display: flex; flex-direction: column; gap: 10px;">
+    <div>
+      <label style="font-size: 11px; color: var(--text-muted);">Enrolled Student</label>
+      <select id="asm-student-id" onchange="autoFetchAttendance()" style="width: 100%; padding: 10px; background: var(--bg-main); border: 1px solid var(--border-color); color: #fff; border-radius: 6px;" required>
+        <option value="">Select Student...</option>
+      </select>
+    </div>
+
+    <div style="display: flex; gap: 10px;">
+      <div style="flex: 1;">
+        <label style="font-size: 11px; color: var(--text-muted);">Programme</label>
+        <input type="text" id="asm-programme" readonly style="width: 100%; padding: 10px; background: var(--bg-hover); border: 1px solid var(--border-color); color: #aaa; border-radius: 6px;">
+      </div>
+      <div style="flex: 1;">
+        <label style="font-size: 11px; color: var(--text-muted);">Cohort</label>
+        <input type="text" id="asm-cohort" readonly style="width: 100%; padding: 10px; background: var(--bg-hover); border: 1px solid var(--border-color); color: #aaa; border-radius: 6px;">
+      </div>
+    </div>
+
+    <div>
+      <label style="font-size: 11px; color: var(--text-muted);">Course Name</label>
+      <input type="text" id="asm-course" placeholder="e.g. Full Stack Web Dev" style="width: 100%; padding: 10px; background: var(--bg-main); border: 1px solid var(--border-color); color: #fff; border-radius: 6px;" required>
+    </div>
+
+    <div style="background: var(--bg-main); padding: 10px; border-radius: 6px; border: 1px solid var(--border-color); display: flex; flex-direction: column; gap: 8px;">
+      <div style="display: flex; justify-content: space-between; font-size: 12px;">
+        <span>Attendance Score (Auto 30%):</span>
+        <strong id="asm-attendance-preview" style="color: var(--accent);">0.00 %</strong>
+      </div>
+      
+      <div>
+        <label style="font-size: 11px; color: var(--text-muted);">Assignment Score (Max 20%):</label>
+        <input type="number" id="asm-assignment" max="20" min="0" placeholder="0 - 20" style="width: 100%; padding: 8px; background: var(--bg-card); border: 1px solid var(--border-color); color: #fff; border-radius: 4px;" required>
+      </div>
+
+      <div>
+        <label style="font-size: 11px; color: var(--text-muted);">Exam Score (Max 50%):</label>
+        <input type="number" id="asm-exam" max="50" min="0" placeholder="0 - 50" style="width: 100%; padding: 8px; background: var(--bg-card); border: 1px solid var(--border-color); color: #fff; border-radius: 4px;" required>
+      </div>
+    </div>
+
+    <div style="display: flex; gap: 10px; margin-top: 10px;">
+      <button id="save-asm-btn" onclick="submitAssessment()" style="flex: 1; padding: 10px; background: var(--accent); color: #fff; border: none; border-radius: 6px; font-weight: 600;">Save Assessment</button>
+      <button onclick="closeAssessmentModal()" style="flex: 1; padding: 10px; background: var(--bg-hover); color: #fff; border: none; border-radius: 6px;">Cancel</button>
+    </div>
+  </div>
+</div>
+
+<script>
+let allAssessmentsData = [];
+
+function renderAssessmentView() {
+  const contentPanel = document.getElementById('main-content');
+  contentPanel.innerHTML = `
+    <div class="module-card">
+      <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 14px; gap: 10px; flex-wrap: wrap;">
+        <h3>Course Assessments</h3>
+        <button onclick="openAssessmentModal()" style="padding: 8px 12px; background: var(--accent); color: #fff; border: none; border-radius: 6px; font-size: 12px; font-weight: 600; display: flex; align-items: center; gap: 6px;">
+          <i class="fa-solid fa-plus"></i> Record Assessment
+        </button>
+      </div>
+
+      <div style="margin-bottom: 14px; display: flex; gap: 10px; flex-wrap: wrap;">
+        <input type="text" id="asm-search-input" onkeyup="filterAssessments()" placeholder="Filter by Student ID, Name, Programme, Cohort, Course..." style="flex: 1; padding: 10px 12px; background: var(--bg-main); border: 1px solid var(--border-color); color: #fff; border-radius: 6px; font-size: 13px;">
+      </div>
+
+      <div id="asm-list" style="display: flex; flex-direction: column; gap: 10px;">
+        <p style="color: var(--text-muted); text-align: center; padding: 16px;">Loading assessments...</p>
+      </div>
+    </div>
+  `;
+
+  loadAssessmentData();
+}
+
+function loadAssessmentData() {
+  google.script.run
+    .withSuccessHandler(data => {
+      allAssessmentsData = data || [];
+      displayAssessmentCards(allAssessmentsData);
+    })
+    .getAssessments();
+}
+
+function displayAssessmentCards(data) {
+  const container = document.getElementById('asm-list');
+  if (!data.length) {
+    container.innerHTML = `<p style="color: var(--text-muted); text-align: center;">No assessment records found.</p>`;
+    return;
+  }
+
+  let html = '';
+  data.forEach(item => {
+    let scoreColor = item.totalScore >= 70 ? '#10B981' : item.totalScore >= 50 ? '#F59E0B' : '#EF4444';
+    html += `
+      <div style="background: var(--bg-main); border: 1px solid var(--border-color); border-radius: 8px; padding: 12px; display: flex; align-items: center; justify-content: space-between; gap: 10px; flex-wrap: wrap;">
+        <div style="display: flex; align-items: center; gap: 12px;">
+          <img src="${item.passport}" style="width: 44px; height: 44px; border-radius: 50%; object-fit: cover; border: 2px solid var(--accent);" onError="this.src='https://via.placeholder.com/150'">
+          <div>
+            <div style="font-weight: 600; font-size: 14px;">${item.studentName} <span style="font-size: 11px; color: var(--accent);">(${item.studentId})</span></div>
+            <div style="font-weight: 500; font-size: 12px; color: #fff; margin-top: 2px;">${item.courseName}</div>
+            <div style="color: var(--text-muted); font-size: 11px;">${item.programme} &bull; ${item.cohort}</div>
+          </div>
+        </div>
+
+        <div style="display: flex; align-items: center; gap: 16px;">
+          <div style="text-align: right; font-size: 11px; color: var(--text-muted);">
+            <div>Att: ${item.attendanceScore}/30 | Ass: ${item.assignmentScore}/20 | Exam: ${item.examScore}/50</div>
+            <div style="font-size: 14px; font-weight: 700; color: ${scoreColor}; margin-top: 2px;">Total: ${item.totalScore}%</div>
+          </div>
+          <button onclick='openAssessmentModal(${JSON.stringify(item)})' style="background: none; border: none; color: var(--accent); cursor: pointer;"><i class="fa-solid fa-pen-to-square"></i></button>
+        </div>
+      </div>
+    `;
+  });
+  container.innerHTML = html;
+}
+
+function filterAssessments() {
+  const query = document.getElementById('asm-search-input').value.toLowerCase().trim();
+  const filtered = allAssessmentsData.filter(item => 
+    item.studentId.toLowerCase().includes(query) ||
+    item.studentName.toLowerCase().includes(query) ||
+    item.programme.toLowerCase().includes(query) ||
+    item.cohort.toLowerCase().includes(query) ||
+    item.courseName.toLowerCase().includes(query)
+  );
+  displayAssessmentCards(filtered);
+}
+
+function openAssessmentModal(item = null) {
+  document.getElementById('assessment-modal-title').innerText = item ? "Edit Assessment" : "Record Assessment";
+  document.getElementById('asm-row').value = item ? item.row : "";
+  document.getElementById('asm-id').value = item ? item.assessmentId : "";
+
+  // Fetch active enrolments to populate student dropdown
+  google.script.run
+    .withSuccessHandler(enrolments => {
+      const select = document.getElementById('asm-student-id');
+      select.innerHTML = '<option value="">Select Enrolled Student...</option>';
+      
+      window.enrolmentCache = enrolments; // Cache locally
+      enrolments.forEach(e => {
+        select.innerHTML += `<option value="${e.studentId}" data-prog="${e.programme}" data-cohort="${e.cohort}">${e.studentName} - ${e.programme} (${e.cohort})</option>`;
+      });
+
+      if (item) {
+        select.value = item.studentId;
+        document.getElementById('asm-programme').value = item.programme;
+        document.getElementById('asm-cohort').value = item.cohort;
+        document.getElementById('asm-course').value = item.courseName;
+        document.getElementById('asm-assignment').value = item.assignmentScore;
+        document.getElementById('asm-exam').value = item.examScore;
+        document.getElementById('asm-attendance-preview').innerText = item.attendanceScore + " %";
+      }
+
+      document.getElementById('modal-overlay').classList.add('active');
+      document.getElementById('assessment-modal').style.display = 'block';
+    })
+    .getEnrolments();
+}
+
+function autoFetchAttendance() {
+  const select = document.getElementById('asm-student-id');
+  const selectedOpt = select.options[select.selectedIndex];
+  
+  if (!selectedOpt.value) return;
+
+  const prog = selectedOpt.getAttribute('data-prog');
+  const cohort = selectedOpt.getAttribute('data-cohort');
+  
+  document.getElementById('asm-programme').value = prog;
+  document.getElementById('asm-cohort').value = cohort;
+
+  const course = document.getElementById('asm-course').value;
+  if (course) {
+    google.script.run
+      .withSuccessHandler(score => {
+        document.getElementById('asm-attendance-preview').innerText = score + " %";
+      })
+      .calculateAttendanceScore(selectedOpt.value, prog, cohort, course);
+  }
+}
+
+function closeAssessmentModal() {
+  document.getElementById('modal-overlay').classList.remove('active');
+  document.getElementById('assessment-modal').style.display = 'none';
+}
+
+function submitAssessment() {
+  const btn = document.getElementById('save-asm-btn');
+  const form = {
+    row: document.getElementById('asm-row').value,
+    assessmentId: document.getElementById('asm-id').value,
+    studentId: document.getElementById('asm-student-id').value,
+    programme: document.getElementById('asm-programme').value,
+    cohort: document.getElementById('asm-cohort').value,
+    courseName: document.getElementById('asm-course').value,
+    assignmentScore: document.getElementById('asm-assignment').value,
+    examScore: document.getElementById('asm-exam').value
+  };
+
+  if (!form.studentId || !form.courseName) {
+    return alert("Student and Course Name are required.");
+  }
+
+  btn.disabled = true;
+  btn.innerText = "Saving...";
+
+  google.script.run
+    .withSuccessHandler(() => {
+      btn.disabled = false;
+      btn.innerText = "Save Assessment";
+      closeAssessmentModal();
+      renderAssessmentView();
+    })
+    .withFailureHandler(err => {
+      btn.disabled = false;
+      btn.innerText = "Save Assessment";
+      alert("Error saving: " + err.message);
+    })
+    .saveAssessment(form);
+}
+
+// In Assessment.html: When student is selected
+function autoFetchProgrammeCourses() {
+  const select = document.getElementById('asm-student-id');
+  const selectedOpt = select.options[select.selectedIndex];
+  if (!selectedOpt.value) return;
+
+  const programmeName = selectedOpt.getAttribute('data-prog');
+  const cohort = selectedOpt.getAttribute('data-cohort');
+
+  document.getElementById('asm-programme').value = programmeName;
+  document.getElementById('asm-cohort').value = cohort;
+
+  // Fetch only courses allocated to this specific programme sheet
+  google.script.run
+    .withSuccessHandler(courses => {
+      const courseSelect = document.getElementById('asm-course-select');
+      courseSelect.innerHTML = '<option value="">Select Allocated Course...</option>';
+      
+      if (!courses.length) {
+        courseSelect.innerHTML += '<option value="" disabled>No active courses found for this programme</option>';
+        return;
+      }
+
+      courses.forEach(c => {
+        courseSelect.innerHTML += `<option value="${c.courseName}">${c.courseName} (${c.unit} Units)</option>`;
+      });
+    })
+    .getCoursesByProgramme(programmeName);
+}
+
+
+
+
+</script>
+
+
+
+  <!-- Attendance.html was not converted: the menu already sends people to a separate
+       GitHub Pages app instead of rendering anything locally (see ATTENDANCE_URL in config.js).
+       If you also want Attendance's own screen inside this app, send me Attendance.html.txt. -->
+
+  <script>
+  const GITHUB_WEBCAM_URL = (window.ABBS_CONFIG && window.ABBS_CONFIG.ATTENDANCE_URL) || "https://temioyeyipo.github.io/attendance/index.html";
+
+  function toggleSidebar() {
+    document.getElementById('sidebar').classList.toggle('open');
+    document.getElementById('modal-overlay').classList.toggle('active');
+  }
+
+  function closeModal() {
+    if (document.getElementById('sidebar').classList.contains('open')) {
+      toggleSidebar();
+    }
+  }
+
+  function loadModule(name, iconClass, element) {
+    // REDIRECT FIX: Target top window to break out of Apps Script iframe
+    if (name === 'Attendance') {
+      try {
+        window.top.location.href = GITHUB_WEBCAM_URL;
+      } catch (e) {
+        // Fallback if cross-origin policy blocks window.top access
+        window.open(GITHUB_WEBCAM_URL, '_blank');
+      }
+      return;
+    }
+
+    document.getElementById('page-title').innerText = name;
+    if (element) {
+      document.querySelectorAll('.menu-item').forEach(el => el.classList.remove('active'));
+      element.classList.add('active');
+    }
+    if (document.getElementById('sidebar').classList.contains('open')) toggleSidebar();
+
+    // Safe QR Scanner Teardown
+    if (window.html5QrcodeScanner) {
+      try {
+        if (typeof window.html5QrcodeScanner.stop === 'function') {
+          window.html5QrcodeScanner.stop().then(() => window.html5QrcodeScanner.clear());
+        } else if (typeof window.html5QrcodeScanner.clear === 'function') {
+          window.html5QrcodeScanner.clear();
+        }
+      } catch (e) {
+        console.warn("Scanner cleanup skipped:", e);
+      }
+      window.html5QrcodeScanner = null;
+    }
+
+    // Router Switch
+    if (name === 'Dashboard') {
+      if (typeof renderDashboardView === 'function') renderDashboardView();
+    } else if (name === 'Programmes') {
+      if (typeof renderProgrammesView === 'function') renderProgrammesView();
+    } else if (name === 'Courses') {
+      if (typeof renderCoursesView === 'function') renderCoursesView();
+    } else if (name === 'Cohorts') {
+      if (typeof renderCohortsView === 'function') renderCohortsView();
+    } else if (name === 'Students') {
+      if (typeof renderStudentsView === 'function') renderStudentsView();
+    } else if (name === 'Enrolment') {
+      if (typeof renderEnrolmentView === 'function') renderEnrolmentView();
+    } else if (name === 'Assessment') {
+      if (typeof renderAssessmentView === 'function') renderAssessmentView();
+    } else {
+      renderPlaceholderView(name, iconClass);
+    }
+  }
+
+  function renderPlaceholderView(name, iconClass) {
+    document.getElementById('main-content').innerHTML = `
+      <div class="module-card" style="text-align: center; padding: 32px 16px;">
+        <i class="fa-solid ${iconClass}" style="font-size: 32px; color: var(--accent); margin-bottom: 12px;"></i>
+        <h3>${name} Module</h3>
+        <p style="color: var(--text-muted); margin-top: 8px;">Ready for modular file injection.</p>
+      </div>
+    `;
+  }
+
+</script>
+</body>
+</html>
