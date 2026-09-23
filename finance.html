@@ -1,0 +1,1275 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+  <meta name="theme-color" content="#0B1F3A">
+  <meta name="robots" content="noindex, nofollow">
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Ctext y='.9em' font-size='90'%3E%F0%9F%8F%AB%3C/text%3E%3C/svg%3E">
+  <!-- Your settings (Apps Script URL, logo file ID) live in config.js -->
+  <script src="config.js"></script>
+  <title>ABBS Finance Management System</title>
+  <!-- Tailwind CSS CDN -->
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script>
+    // Brand palette: navy blue with a touch of gold
+    tailwind.config = {
+      theme: { extend: { colors: {
+        navy: { 50:'#F2F5FA', 100:'#E3E9F3', 200:'#C2CEE3', 300:'#92A6C9', 400:'#5F7BAD', 500:'#3A5A91',
+                600:'#274677', 700:'#1B3560', 800:'#122A4D', 900:'#0B1F3A', 950:'#07152A' },
+        gold: { 50:'#FCF8E8', 100:'#F8EFC8', 200:'#F0DE93', 300:'#E6CB5F', 400:'#D4AF37', 500:'#B8941F',
+                600:'#977718', 700:'#765C15', 800:'#5A4611', 900:'#3F300C' }
+      } } }
+    };
+  </script>
+  <!-- FontAwesome Icons -->
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+  <style>
+    .active-nav { background-color: #122A4D; border-left: 4px solid #D4AF37; }
+
+    /* Bottom navigation (phones) */
+    .active-mnav { color: #ffffff; background-color: #122A4D; box-shadow: inset 0 3px 0 #D4AF37; }
+    .safe-bottom { padding-bottom: env(safe-area-inset-bottom); }
+
+    html { -webkit-text-size-adjust: 100%; }
+
+    /* Gold focus ring on every field, so it is always clear which box you are typing in */
+    input:focus, select:focus, textarea:focus {
+      outline: none; border-color: #D4AF37; box-shadow: 0 0 0 2px rgba(212, 175, 55, 0.55);
+    }
+    button, select, a { touch-action: manipulation; -webkit-tap-highlight-color: transparent; }
+
+    /* ---------- PHONE LAYOUT (below 768px) ---------- */
+    @media (max-width: 767px) {
+      /* 16px text stops the browser zooming in on focus, and bigger fields are easier to tap */
+      input, select, textarea { font-size: 16px !important; }
+      input:not([type="checkbox"]):not([type="radio"]), select { min-height: 46px; }
+      form button[type="submit"] { min-height: 48px; font-size: 16px; }
+
+      /* Tables turn into one card per row, with the column name shown beside each value */
+      .rtable, .rtable tbody { display: block; width: 100%; }
+      .rtable thead { display: none; }
+      .rtable tr { display: block; padding: 0.7rem 1rem; }
+      .rtable td {
+        display: flex; align-items: flex-start; justify-content: space-between; gap: 1rem;
+        padding: 0.22rem 0 !important; text-align: right !important;
+        font-size: 0.875rem; overflow-wrap: anywhere;
+      }
+      .rtable td::before {
+        content: attr(data-label); flex: 0 0 auto; padding-top: 0.15rem;
+        font-size: 0.68rem; font-weight: 700; letter-spacing: 0.04em;
+        text-transform: uppercase; color: #7D8FB0; text-align: left;
+      }
+      .rtable td[colspan] { display: block; text-align: center !important; }
+      .rtable td[colspan]::before { content: none; }
+      .rtable td.actions { display: block; padding-top: 0.6rem !important; }
+      .rtable td.actions::before { content: none; }
+      .rtable td.actions button { width: 100%; min-height: 44px; font-size: 0.9rem; }
+      .m-hide { display: none !important; }
+    }
+  </style>
+</head>
+<body class="bg-navy-50 font-sans text-navy-900 min-h-screen md:flex md:h-screen md:overflow-hidden">
+
+  <!-- SIDEBAR NAVIGATION (tablet / desktop) -->
+  <aside class="hidden md:flex w-64 bg-navy-900 text-white flex-col justify-between shrink-0">
+    <div>
+      <div class="p-5 border-b border-navy-800 flex items-center gap-3">
+        <div class="brand-fallback bg-gold-400 text-navy-900 p-2 rounded-lg font-bold"><i class="fa-solid fa-graduation-cap"></i></div>
+        <img class="brand-logo hidden h-10 w-auto max-w-[56px] shrink-0 object-contain bg-white rounded-lg p-1 ring-2 ring-gold-400" alt="ABBS logo">
+        <div>
+          <h1 class="font-bold text-lg leading-none">ABBS Finance</h1>
+          <span class="text-xs text-navy-300">School Financial Hub v1.3</span>
+        </div>
+      </div>
+
+      <nav class="mt-4 px-2 space-y-1">
+        <button onclick="switchTab('dashboard')" id="nav-dashboard" class="nav-btn active-nav w-full flex items-center gap-3 px-4 py-3 text-sm font-medium rounded-md hover:bg-navy-800 transition">
+          <i class="fa-solid fa-chart-line text-gold-400 w-5"></i> Dashboard
+        </button>
+        <button onclick="switchTab('student-ledger')" id="nav-student-ledger" class="nav-btn w-full flex items-center gap-3 px-4 py-3 text-sm font-medium rounded-md hover:bg-navy-800 transition">
+          <i class="fa-solid fa-id-card text-gold-400 w-5"></i> Student Fee Ledger
+        </button>
+        <button onclick="switchTab('inflow')" id="nav-inflow" class="nav-btn w-full flex items-center gap-3 px-4 py-3 text-sm font-medium rounded-md hover:bg-navy-800 transition">
+          <i class="fa-solid fa-hand-holding-dollar text-gold-400 w-5"></i> General Inflow
+        </button>
+        <button onclick="switchTab('outflow')" id="nav-outflow" class="nav-btn w-full flex items-center gap-3 px-4 py-3 text-sm font-medium rounded-md hover:bg-navy-800 transition">
+          <i class="fa-solid fa-file-invoice-dollar text-gold-400 w-5"></i> Expense Entry
+        </button>
+        <button onclick="switchTab('imprest')" id="nav-imprest" class="nav-btn w-full flex items-center gap-3 px-4 py-3 text-sm font-medium rounded-md hover:bg-navy-800 transition">
+          <i class="fa-solid fa-wallet text-gold-400 w-5"></i> Petty Cash (Imprest)
+        </button>
+        <button onclick="switchTab('audit')" id="nav-audit" class="nav-btn w-full flex items-center gap-3 px-4 py-3 text-sm font-medium rounded-md hover:bg-navy-800 transition">
+          <i class="fa-solid fa-clock-rotate-left text-gold-400 w-5"></i> Audit Trail
+        </button>
+      </nav>
+    </div>
+
+    <div class="p-4 border-t border-navy-800 text-xs text-navy-300 space-y-1">
+      <div>Currency: <span class="text-gold-300 font-semibold">NGN (?)</span></div>
+      <div id="who-row" class="hidden">Signed in as <span id="who" class="text-gold-300 font-semibold break-all"></span></div>
+    </div>
+  </aside>
+
+  <!-- MAIN CONTENT AREA -->
+  <main class="flex-1 flex flex-col min-w-0 md:overflow-y-auto">
+
+    <!-- Shown only while config.js has no API_URL -->
+    <div id="demo-banner" class="hidden bg-gold-100 text-navy-900 text-xs text-center py-2 px-3 border-b border-gold-300">
+      Demo mode: this page is not connected to your Google Sheet yet. Add your Apps Script URL in <strong>config.js</strong>.
+    </div>
+
+    <!-- TOP HEADER -->
+    <header class="bg-white border-b-2 border-gold-400 px-4 md:px-8 py-3 md:py-4 flex justify-between items-center gap-3 sticky top-0 z-20">
+      <div class="flex items-center gap-2.5 min-w-0">
+        <div class="brand-fallback md:hidden bg-navy-900 text-gold-400 w-8 h-8 rounded-lg flex items-center justify-center shrink-0">
+          <i class="fa-solid fa-graduation-cap text-sm"></i>
+        </div>
+        <img class="brand-logo hidden md:hidden h-9 w-auto max-w-[64px] object-contain shrink-0" alt="ABBS logo">
+        <h2 id="page-title" class="text-base md:text-xl font-bold text-navy-900 truncate"><span class="md:hidden">Dashboard</span><span class="hidden md:inline">Financial Dashboard</span></h2>
+      </div>
+      <div class="flex items-center gap-3 shrink-0">
+        <button onclick="refreshData()" aria-label="Refresh" class="px-3 py-2 md:py-1.5 text-xs font-semibold text-navy-700 bg-navy-50 hover:bg-navy-100 rounded border border-navy-200 transition">
+          <i class="fa-solid fa-rotate"></i><span class="hidden sm:inline"> Refresh</span>
+        </button>
+        <button id="btn-signout" onclick="signOut()" aria-label="Sign out" title="Sign out" class="hidden px-3 py-2 md:py-1.5 text-xs font-semibold text-navy-700 bg-navy-50 hover:bg-navy-100 rounded border border-navy-200 transition">
+          <i class="fa-solid fa-right-from-bracket"></i><span class="hidden sm:inline"> Sign out</span>
+        </button>
+        <span class="hidden sm:inline-block text-sm bg-gold-50 text-navy-800 border border-gold-300 px-3 py-1 rounded-full font-medium">Session: 2026</span>
+      </div>
+    </header>
+
+    <div class="p-4 md:p-8 space-y-4 md:space-y-6 pb-28 md:pb-8">
+
+      <!-- SECTION 1: DASHBOARD VIEW -->
+      <section id="view-dashboard" class="tab-view space-y-4 md:space-y-6">
+        <div class="grid grid-cols-2 md:grid-cols-4 gap-3 md:gap-5">
+          <div class="bg-white p-3 md:p-5 rounded-xl border border-navy-100 shadow-sm min-w-0">
+            <span class="text-[10px] md:text-xs font-bold text-navy-400 uppercase tracking-wider">Total Revenue</span>
+            <div id="stat-revenue" class="text-base sm:text-xl 2xl:text-2xl font-black text-emerald-600 mt-1 break-words md:break-normal md:whitespace-nowrap">?0.00</div>
+          </div>
+          <div class="bg-white p-3 md:p-5 rounded-xl border border-navy-100 shadow-sm min-w-0">
+            <span class="text-[10px] md:text-xs font-bold text-navy-400 uppercase tracking-wider">Total Expenses</span>
+            <div id="stat-expenses" class="text-base sm:text-xl 2xl:text-2xl font-black text-rose-600 mt-1 break-words md:break-normal md:whitespace-nowrap">?0.00</div>
+          </div>
+          <div class="bg-white p-3 md:p-5 rounded-xl border border-navy-100 shadow-sm min-w-0">
+            <span class="text-[10px] md:text-xs font-bold text-navy-400 uppercase tracking-wider">Imprest Balance</span>
+            <div id="stat-imprest" class="text-base sm:text-xl 2xl:text-2xl font-black text-gold-700 mt-1 break-words md:break-normal md:whitespace-nowrap">?0.00</div>
+          </div>
+          <div class="bg-navy-900 p-3 md:p-5 rounded-xl border border-navy-900 shadow-sm min-w-0">
+            <span class="text-[10px] md:text-xs font-bold text-navy-200 uppercase tracking-wider">Net Position</span>
+            <div id="stat-net" class="text-base sm:text-xl 2xl:text-2xl font-black text-gold-300 mt-1 break-words md:break-normal md:whitespace-nowrap">?0.00</div>
+          </div>
+        </div>
+        <p class="text-xs text-navy-400">Totals count POSTED entries only. Imprest funding (transfers) and voided entries are not counted as revenue or expenses.</p>
+
+        <div class="bg-white rounded-xl border border-navy-100 shadow-sm overflow-hidden">
+          <div class="p-4 md:p-5 border-b border-navy-100 font-bold text-navy-800 flex justify-between items-center">
+            <span>Recent Financial Activity</span>
+            <span class="text-xs text-navy-400 font-normal">Latest 50</span>
+          </div>
+          <div class="overflow-x-auto">
+            <table class="rtable w-full text-left text-sm">
+              <thead class="bg-navy-50 text-navy-600 font-semibold border-b">
+                <tr>
+                  <th class="p-3">Txn ID</th>
+                  <th class="p-3">Date</th>
+                  <th class="p-3">Type</th>
+                  <th class="p-3">Category</th>
+                  <th class="p-3">Cohort</th>
+                  <th class="p-3">Imprest</th>
+                  <th class="p-3 text-right">Amount</th>
+                </tr>
+              </thead>
+              <tbody id="dashboard-txn-tbody" class="divide-y divide-navy-100">
+                <tr><td colspan="7" class="p-4 text-center text-navy-400">Loading data...</td></tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </section>
+
+      <!-- SECTION 2: STUDENT FEE LEDGER & RECEIPT GENERATOR -->
+      <section id="view-student-ledger" class="tab-view hidden space-y-4 md:space-y-6">
+        <div class="grid grid-cols-1 lg:grid-cols-3 gap-4 md:gap-6">
+
+          <!-- LEFT: Student Fee Form -->
+          <div class="bg-white p-4 sm:p-6 rounded-xl border border-navy-100 shadow-sm space-y-4">
+            <h3 class="text-lg font-bold text-navy-900 border-b pb-3 flex items-center gap-2">
+              <i class="fa-solid fa-receipt text-gold-500"></i> Record Student Fee
+            </h3>
+
+            <form id="form-student-fee" onsubmit="handleStudentFeeSubmit(event)">
+              <div class="space-y-3">
+                <div>
+                  <label class="block text-xs font-bold text-navy-700 mb-1">Student ID *</label>
+                  <input type="text" name="StudentID" required placeholder="e.g., STU-2026-089" autocomplete="off" class="w-full border rounded-lg p-2.5 text-sm focus:ring-2 focus:ring-gold-400 outline-none">
+                </div>
+
+                <div>
+                  <label class="block text-xs font-bold text-navy-700 mb-1">Student Full Name *</label>
+                  <input type="text" name="StudentName" required placeholder="e.g., Jane Doe" autocomplete="off" class="w-full border rounded-lg p-2.5 text-sm focus:ring-2 focus:ring-gold-400 outline-none">
+                </div>
+
+                <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                  <div>
+                    <label class="block text-xs font-bold text-navy-700 mb-1">Date</label>
+                    <input type="date" name="Date" required class="w-full border rounded-lg p-2.5 text-sm outline-none">
+                  </div>
+                  <div>
+                    <label class="block text-xs font-bold text-navy-700 mb-1">Amount (?) *</label>
+                    <input type="number" inputmode="decimal" step="0.01" min="0.01" name="Amount" required placeholder="0.00" class="w-full border rounded-lg p-2.5 text-sm outline-none">
+                  </div>
+                </div>
+
+                <div>
+                  <label class="block text-xs font-bold text-navy-700 mb-1">Cohort / Program</label>
+                  <select name="CohortID" id="student-cohort-select" required class="w-full border rounded-lg p-2.5 text-sm outline-none bg-white">
+                    <!-- Populated dynamically -->
+                  </select>
+                </div>
+
+                <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                  <div>
+                    <label class="block text-xs font-bold text-navy-700 mb-1">Deposit Account</label>
+                    <select name="AccountID" id="student-account-select" required class="w-full border rounded-lg p-2.5 text-sm outline-none bg-white">
+                      <!-- Populated dynamically -->
+                    </select>
+                  </div>
+                  <div>
+                    <label class="block text-xs font-bold text-navy-700 mb-1">Method</label>
+                    <select name="PaymentMethod" class="w-full border rounded-lg p-2.5 text-sm outline-none bg-white">
+                      <option value="Bank Transfer">Bank Transfer</option>
+                      <option value="Cash">Cash</option>
+                      <option value="POS">POS</option>
+                    </select>
+                  </div>
+                </div>
+
+                <div>
+                  <label class="block text-xs font-bold text-navy-700 mb-1">Notes / Term / Purpose</label>
+                  <input type="text" name="Description" placeholder="e.g., 1st Semester Tuition Balance" class="w-full border rounded-lg p-2.5 text-sm outline-none">
+                </div>
+              </div>
+
+              <button type="submit" id="btn-submit-student-fee" class="mt-4 w-full bg-navy-800 hover:bg-navy-900 text-white font-bold py-2.5 rounded-lg transition shadow-sm flex justify-center items-center gap-2">
+                <i class="fa-solid fa-file-pdf"></i> Save & Generate PDF Receipt
+              </button>
+            </form>
+          </div>
+
+          <!-- RIGHT: Student Ledger Table -->
+          <div class="lg:col-span-2 bg-white rounded-xl border border-navy-100 shadow-sm flex flex-col overflow-hidden">
+            <div class="p-4 border-b border-navy-100 flex flex-col sm:flex-row sm:justify-between sm:items-center gap-3 bg-navy-50">
+              <h4 class="font-bold text-navy-800">Student Payment History</h4>
+              <div class="w-full sm:w-64">
+                <input type="search" id="ledger-search" onkeyup="filterStudentLedger()" oninput="filterStudentLedger()" placeholder="Search Student ID or Name..." class="w-full border rounded-lg px-3 py-1.5 text-xs outline-none">
+              </div>
+            </div>
+
+            <div class="overflow-x-auto flex-1">
+              <table class="rtable w-full text-left text-sm">
+                <thead class="bg-navy-100 text-navy-600 font-semibold border-b">
+                  <tr>
+                    <th class="p-3">Txn ID</th>
+                    <th class="p-3">Date</th>
+                    <th class="p-3">Student Info</th>
+                    <th class="p-3">Cohort</th>
+                    <th class="p-3 text-right">Amount</th>
+                  </tr>
+                </thead>
+                <tbody id="student-ledger-tbody" class="divide-y divide-navy-100">
+                  <tr><td colspan="5" class="p-4 text-center text-navy-400">Loading student records...</td></tr>
+                </tbody>
+              </table>
+            </div>
+          </div>
+
+        </div>
+      </section>
+
+      <!-- SECTION 3: GENERAL INFLOW FORM -->
+      <section id="view-inflow" class="tab-view hidden max-w-2xl mx-auto">
+        <div class="bg-white p-4 sm:p-6 rounded-xl border border-navy-100 shadow-sm space-y-4">
+          <h3 class="text-lg font-bold text-navy-900 border-b pb-3">Record General Revenue / Inflow Entry</h3>
+
+          <form id="form-inflow" onsubmit="handleTransactionSubmit(event, 'INFLOW')">
+            <div class="grid grid-cols-1 sm:grid-cols-2 gap-3 sm:gap-4">
+              <div>
+                <label class="block text-xs font-bold text-navy-700 mb-1">Date</label>
+                <input type="date" name="Date" required class="w-full border rounded-lg p-2.5 text-sm focus:ring-2 focus:ring-gold-400 outline-none">
+              </div>
+              <div>
+                <label class="block text-xs font-bold text-navy-700 mb-1">Amount (?)</label>
+                <input type="number" inputmode="decimal" step="0.01" min="0.01" name="Amount" required placeholder="0.00" class="w-full border rounded-lg p-2.5 text-sm focus:ring-2 focus:ring-gold-400 outline-none">
+              </div>
+            </div>
+
+            <div class="grid grid-cols-1 sm:grid-cols-2 gap-3 sm:gap-4 mt-3">
+              <div>
+                <label class="block text-xs font-bold text-navy-700 mb-1">Category</label>
+                <select name="CategoryID" id="inflow-category-select" required class="w-full border rounded-lg p-2.5 text-sm focus:ring-2 focus:ring-gold-400 outline-none bg-white">
+                  <!-- Populated dynamically -->
+                </select>
+              </div>
+              <div>
+                <label class="block text-xs font-bold text-navy-700 mb-1">Cohort / Class</label>
+                <select name="CohortID" id="inflow-cohort-select" required class="w-full border rounded-lg p-2.5 text-sm focus:ring-2 focus:ring-gold-400 outline-none bg-white">
+                  <!-- Populated dynamically -->
+                </select>
+              </div>
+            </div>
+
+            <div class="grid grid-cols-1 sm:grid-cols-2 gap-3 sm:gap-4 mt-3">
+              <div>
+                <label class="block text-xs font-bold text-navy-700 mb-1">Target Account</label>
+                <select name="AccountID" id="inflow-account-select" required class="w-full border rounded-lg p-2.5 text-sm focus:ring-2 focus:ring-gold-400 outline-none bg-white">
+                  <!-- Populated dynamically -->
+                </select>
+              </div>
+              <div>
+                <label class="block text-xs font-bold text-navy-700 mb-1">Payment Method</label>
+                <select name="PaymentMethod" class="w-full border rounded-lg p-2.5 text-sm focus:ring-2 focus:ring-gold-400 outline-none bg-white">
+                  <option value="Bank Transfer">Bank Transfer</option>
+                  <option value="Cash">Cash</option>
+                  <option value="POS">POS</option>
+                </select>
+              </div>
+            </div>
+
+            <div class="mt-3">
+              <label class="block text-xs font-bold text-navy-700 mb-1">Description / Reference</label>
+              <textarea name="Description" rows="2" placeholder="e.g., Miscellaneous institutional revenue" class="w-full border rounded-lg p-2.5 text-sm focus:ring-2 focus:ring-gold-400 outline-none"></textarea>
+            </div>
+
+            <button type="submit" class="mt-4 w-full bg-navy-800 hover:bg-navy-900 text-white font-bold py-2.5 rounded-lg transition shadow-sm">
+              Post General Inflow Record
+            </button>
+          </form>
+        </div>
+      </section>
+
+      <!-- SECTION 4: EXPENSE / OUTFLOW FORM -->
+      <section id="view-outflow" class="tab-view hidden max-w-2xl mx-auto">
+        <div class="bg-white p-4 sm:p-6 rounded-xl border border-navy-100 shadow-sm space-y-4">
+          <h3 class="text-lg font-bold text-navy-900 border-b pb-3">Record Institutional Expense</h3>
+
+          <form id="form-outflow" onsubmit="handleTransactionSubmit(event, 'OUTFLOW')">
+
+            <!-- Pay this expense out of an imprest (optional) -->
+            <div class="bg-gold-50 border border-gold-300 rounded-lg p-3 mb-4">
+              <label class="block text-xs font-bold text-navy-800 mb-1"><i class="fa-solid fa-wallet"></i> Paid from an imprest? (optional)</label>
+              <select name="ImprestID" id="outflow-imprest-select" onchange="onImprestSelected()" class="w-full border border-gold-300 bg-white rounded-lg p-2.5 text-sm focus:ring-2 focus:ring-gold-400 outline-none">
+                <option value="">Not from an imprest</option>
+              </select>
+              <p id="outflow-imprest-hint" class="hidden text-xs text-navy-800 mt-1.5"></p>
+            </div>
+
+            <div class="grid grid-cols-1 sm:grid-cols-2 gap-3 sm:gap-4">
+              <div>
+                <label class="block text-xs font-bold text-navy-700 mb-1">Date</label>
+                <input type="date" name="Date" required class="w-full border rounded-lg p-2.5 text-sm focus:ring-2 focus:ring-gold-400 outline-none">
+              </div>
+              <div>
+                <label class="block text-xs font-bold text-navy-700 mb-1">Amount (?)</label>
+                <input type="number" inputmode="decimal" step="0.01" min="0.01" name="Amount" required placeholder="0.00" class="w-full border rounded-lg p-2.5 text-sm focus:ring-2 focus:ring-gold-400 outline-none">
+              </div>
+            </div>
+
+            <div class="grid grid-cols-1 sm:grid-cols-2 gap-3 sm:gap-4 mt-3">
+              <div>
+                <label class="block text-xs font-bold text-navy-700 mb-1">Category</label>
+                <select name="CategoryID" id="outflow-category-select" required class="w-full border rounded-lg p-2.5 text-sm focus:ring-2 focus:ring-gold-400 outline-none bg-white">
+                  <!-- Populated dynamically -->
+                </select>
+              </div>
+              <div>
+                <label class="block text-xs font-bold text-navy-700 mb-1">Cohort / Cost Center</label>
+                <select name="CohortID" id="outflow-cohort-select" required class="w-full border rounded-lg p-2.5 text-sm focus:ring-2 focus:ring-gold-400 outline-none bg-white">
+                  <!-- Populated dynamically -->
+                </select>
+              </div>
+            </div>
+
+            <div class="grid grid-cols-1 sm:grid-cols-2 gap-3 sm:gap-4 mt-3">
+              <div>
+                <label class="block text-xs font-bold text-navy-700 mb-1">Paid From Account</label>
+                <select name="AccountID" id="outflow-account-select" required class="w-full border rounded-lg p-2.5 text-sm focus:ring-2 focus:ring-gold-400 outline-none bg-white disabled:bg-navy-50 disabled:text-navy-400">
+                  <!-- Populated dynamically -->
+                </select>
+              </div>
+              <div>
+                <label class="block text-xs font-bold text-navy-700 mb-1">Payment Method</label>
+                <select name="PaymentMethod" id="outflow-method-select" class="w-full border rounded-lg p-2.5 text-sm focus:ring-2 focus:ring-gold-400 outline-none bg-white">
+                  <option value="Cash">Cash</option>
+                  <option value="Bank Transfer">Bank Transfer</option>
+                  <option value="Cheque">Cheque</option>
+                </select>
+              </div>
+            </div>
+
+            <div class="mt-3">
+              <label class="block text-xs font-bold text-navy-700 mb-1">Description / Vendor / Purpose</label>
+              <textarea name="Description" rows="2" placeholder="e.g., Purchase of classroom whiteboards" class="w-full border rounded-lg p-2.5 text-sm focus:ring-2 focus:ring-gold-400 outline-none"></textarea>
+            </div>
+
+            <button type="submit" class="mt-4 w-full bg-navy-800 hover:bg-navy-900 text-white font-bold py-2.5 rounded-lg transition shadow-sm">
+              Post Expense Outflow Record
+            </button>
+          </form>
+        </div>
+      </section>
+
+      <!-- SECTION 5: IMPREST (PETTY CASH) VIEW -->
+      <section id="view-imprest" class="tab-view hidden space-y-4 md:space-y-6">
+        <div class="flex flex-wrap justify-between items-center gap-3">
+          <h3 class="text-base md:text-lg font-bold text-navy-900">Petty Cash (Imprest) Operations</h3>
+          <button onclick="openIssueImprest()" class="w-full sm:w-auto bg-gold-400 hover:bg-gold-500 text-navy-900 font-bold text-sm px-4 py-3 sm:py-2 rounded-lg transition">
+            + Issue New Imprest
+          </button>
+        </div>
+
+        <div class="bg-white rounded-xl border border-navy-100 shadow-sm overflow-hidden">
+          <div class="p-4 border-b font-bold text-navy-800">Imprest Register</div>
+          <div class="overflow-x-auto">
+            <table class="rtable w-full text-left text-sm">
+              <thead class="bg-navy-50 text-navy-600 font-semibold border-b">
+                <tr>
+                  <th class="p-3">Imprest ID</th>
+                  <th class="p-3">Issued Date</th>
+                  <th class="p-3">Recipient</th>
+                  <th class="p-3">Purpose</th>
+                  <th class="p-3 text-right">Issued</th>
+                  <th class="p-3 text-right">Spent</th>
+                  <th class="p-3 text-right">Outstanding</th>
+                  <th class="p-3">Status</th>
+                  <th class="p-3"></th>
+                </tr>
+              </thead>
+              <tbody id="imprest-tbody" class="divide-y divide-navy-100">
+                <tr><td colspan="9" class="p-4 text-center text-navy-400">Loading imprest records...</td></tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </section>
+
+      <!-- SECTION 6: AUDIT LOG VIEW -->
+      <section id="view-audit" class="tab-view hidden">
+        <div class="bg-white rounded-xl border border-navy-100 shadow-sm overflow-hidden">
+          <div class="p-4 border-b font-bold text-navy-800 flex justify-between items-center">
+            <span>System Audit Trail</span>
+            <span class="text-xs text-navy-400 font-normal">Latest 200</span>
+          </div>
+          <div class="overflow-x-auto">
+            <table class="rtable w-full text-left text-sm">
+              <thead class="bg-navy-50 text-navy-600 border-b">
+                <tr>
+                  <th class="p-3">Audit ID</th>
+                  <th class="p-3">Timestamp</th>
+                  <th class="p-3">User</th>
+                  <th class="p-3">Action</th>
+                  <th class="p-3">Record Type</th>
+                  <th class="p-3">Record ID</th>
+                  <th class="p-3">Details</th>
+                </tr>
+              </thead>
+              <tbody id="audit-tbody" class="divide-y divide-navy-100">
+                <tr><td colspan="7" class="p-4 text-center text-navy-400">Loading audit log...</td></tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </section>
+
+    </div>
+  </main>
+
+  <!-- BOTTOM NAVIGATION (phones) -->
+  <nav id="bottom-nav" class="md:hidden fixed bottom-0 inset-x-0 z-30 bg-navy-900 text-navy-200 grid grid-cols-6 border-t border-navy-800 safe-bottom">
+    <button onclick="switchTab('dashboard')" id="mnav-dashboard" class="mnav-btn active-mnav flex flex-col items-center justify-center gap-0.5 py-2 min-h-[58px] text-[10px] font-medium">
+      <i class="fa-solid fa-chart-line text-lg text-gold-400"></i><span>Home</span>
+    </button>
+    <button onclick="switchTab('student-ledger')" id="mnav-student-ledger" class="mnav-btn flex flex-col items-center justify-center gap-0.5 py-2 min-h-[58px] text-[10px] font-medium">
+      <i class="fa-solid fa-id-card text-lg text-gold-400"></i><span>Fees</span>
+    </button>
+    <button onclick="switchTab('inflow')" id="mnav-inflow" class="mnav-btn flex flex-col items-center justify-center gap-0.5 py-2 min-h-[58px] text-[10px] font-medium">
+      <i class="fa-solid fa-hand-holding-dollar text-lg text-gold-400"></i><span>Income</span>
+    </button>
+    <button onclick="switchTab('outflow')" id="mnav-outflow" class="mnav-btn flex flex-col items-center justify-center gap-0.5 py-2 min-h-[58px] text-[10px] font-medium">
+      <i class="fa-solid fa-file-invoice-dollar text-lg text-gold-400"></i><span>Expense</span>
+    </button>
+    <button onclick="switchTab('imprest')" id="mnav-imprest" class="mnav-btn flex flex-col items-center justify-center gap-0.5 py-2 min-h-[58px] text-[10px] font-medium">
+      <i class="fa-solid fa-wallet text-lg text-gold-400"></i><span>Imprest</span>
+    </button>
+    <button onclick="switchTab('audit')" id="mnav-audit" class="mnav-btn flex flex-col items-center justify-center gap-0.5 py-2 min-h-[58px] text-[10px] font-medium">
+      <i class="fa-solid fa-clock-rotate-left text-lg text-gold-400"></i><span>Audit</span>
+    </button>
+  </nav>
+
+  <!-- MODAL: ISSUE IMPREST (bottom sheet on phones) -->
+  <div id="modal-issue-imprest" class="fixed inset-0 bg-navy-900/60 hidden items-end sm:items-center justify-center z-50 sm:p-4">
+    <div class="bg-white rounded-t-2xl sm:rounded-xl w-full sm:max-w-md p-5 sm:p-6 shadow-xl space-y-4 max-h-[92vh] overflow-y-auto">
+      <div class="flex justify-between items-center border-b pb-3">
+        <h4 class="font-bold text-navy-900">Issue Imprest Funds</h4>
+        <button onclick="toggleModal('modal-issue-imprest', false)" aria-label="Close" class="text-navy-400 hover:text-navy-700 text-3xl leading-none w-10 h-10 -mr-2 flex items-center justify-center">&times;</button>
+      </div>
+      <form id="form-issue-imprest" onsubmit="handleIssueImprest(event)">
+        <div class="space-y-3 text-sm">
+          <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
+            <div>
+              <label class="block font-semibold mb-1">Date</label>
+              <input type="date" name="Date" required class="w-full border rounded p-2 outline-none">
+            </div>
+            <div>
+              <label class="block font-semibold mb-1">Amount Issued (?)</label>
+              <input type="number" inputmode="decimal" step="0.01" min="0.01" name="AmountIssued" required class="w-full border rounded p-2 outline-none">
+            </div>
+          </div>
+          <div>
+            <label class="block font-semibold mb-1">Recipient Name</label>
+            <input type="text" name="Recipient" required autocomplete="off" class="w-full border rounded p-2 outline-none">
+          </div>
+          <div>
+            <label class="block font-semibold mb-1">Purpose</label>
+            <textarea name="Purpose" rows="2" required class="w-full border rounded p-2 outline-none"></textarea>
+          </div>
+          <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
+            <div>
+              <label class="block font-semibold mb-1">Imprest Account</label>
+              <select name="AccountID" id="imprest-account-select" required class="w-full border rounded p-2 outline-none bg-white"></select>
+            </div>
+            <div>
+              <label class="block font-semibold mb-1">Cohort / Cost Center</label>
+              <select name="CohortID" id="imprest-cohort-select" required class="w-full border rounded p-2 outline-none bg-white"></select>
+            </div>
+          </div>
+          <p class="text-xs text-navy-600">Issuing an imprest also posts a funding TRANSFER into the imprest account. It is not counted as revenue.</p>
+        </div>
+        <div class="mt-5 flex flex-col-reverse sm:flex-row sm:justify-end gap-2">
+          <button type="button" onclick="toggleModal('modal-issue-imprest', false)" class="px-4 py-3 sm:py-2 text-sm border rounded hover:bg-navy-50">Cancel</button>
+          <button type="submit" class="px-4 py-3 sm:py-2 text-sm bg-gold-400 text-navy-900 rounded font-bold hover:bg-gold-500">Confirm & Issue</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <!-- SIGN-IN SCREEN -->
+  <div id="login-overlay" class="hidden fixed inset-0 z-[60] bg-navy-900 items-center justify-center p-4 overflow-y-auto">
+    <div class="w-full max-w-sm my-auto">
+      <div class="flex flex-col items-center text-center mb-6">
+        <div class="brand-fallback bg-gold-400 text-navy-900 w-14 h-14 rounded-xl flex items-center justify-center text-2xl"><i class="fa-solid fa-graduation-cap"></i></div>
+        <img class="brand-logo hidden h-16 w-auto max-w-[160px] object-contain bg-white rounded-xl p-1.5 ring-2 ring-gold-400" alt="ABBS logo">
+        <h1 class="mt-3 text-2xl font-bold text-white">ABBS Finance</h1>
+        <p class="text-sm text-navy-200">School Financial Hub</p>
+      </div>
+
+      <form id="login-form" onsubmit="handleLogin(event)" class="bg-white rounded-2xl shadow-xl p-5 sm:p-6 space-y-4 border-t-4 border-gold-400">
+        <div>
+          <label class="block text-xs font-bold text-navy-700 mb-1" for="login-user">Your name</label>
+          <input id="login-user" type="text" name="user" required maxlength="60" autocomplete="name" placeholder="e.g., Grace Obi" class="w-full border rounded-lg p-2.5 text-sm outline-none">
+        </div>
+        <div>
+          <label class="block text-xs font-bold text-navy-700 mb-1" for="login-key">Access key</label>
+          <input id="login-key" type="password" name="key" required autocomplete="current-password" class="w-full border rounded-lg p-2.5 text-sm outline-none">
+        </div>
+        <label class="flex items-center gap-2 text-sm text-navy-700">
+          <input type="checkbox" name="remember" checked class="h-4 w-4"> Keep me signed in on this device
+        </label>
+        <p id="login-error" class="hidden text-sm text-red-700 bg-red-50 border border-red-200 rounded-lg p-2.5"></p>
+        <button type="submit" id="btn-login" class="w-full bg-gold-400 hover:bg-gold-500 text-navy-900 font-bold py-3 rounded-lg transition">Sign in</button>
+      </form>
+      <p class="mt-4 text-center text-xs text-navy-300">Ask the finance office for the access key.</p>
+    </div>
+  </div>
+
+  <!-- JAVASCRIPT FRONT-END LOGIC -->
+  <script>
+    let appState = {
+      accounts: [],
+      categories: [],
+      cohorts: [],
+      transactions: [],
+      imprests: [],
+      audit: []
+    };
+
+    /* ---------- Helpers ---------- */
+
+    const MONTHS = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+
+    // Escape text before putting it into HTML
+    function esc(v) {
+      return String(v == null ? '' : v).replace(/[&<>"']/g, c => (
+        { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]
+      ));
+    }
+
+    // 'yyyy-mm-dd' -> 'dd-Mon-yyyy' (no time zone conversion, so the day never shifts)
+    function fmtDate(s) {
+      const m = /^(\d{4})-(\d{2})-(\d{2})/.exec(String(s || ''));
+      return m ? `${m[3]}-${MONTHS[parseInt(m[2], 10) - 1]}-${m[1]}` : esc(s || '');
+    }
+
+    function money(n) {
+      const v = Number(n) || 0;
+      return (v < 0 ? '-' : '') + '?' + Math.abs(v).toLocaleString('en-NG', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+    }
+
+    // Today's date in the user's LOCAL timezone (yyyy-mm-dd), not UTC
+    function todayStr() {
+      const d = new Date();
+      d.setMinutes(d.getMinutes() - d.getTimezoneOffset());
+      return d.toISOString().split('T')[0];
+    }
+
+    function errText(err) {
+      return err && err.message ? err.message : String(err);
+    }
+
+    function setBusy(btn, busy, busyHtml, normalHtml) {
+      btn.disabled = busy;
+      btn.innerHTML = busy ? busyHtml : normalHtml;
+    }
+
+    /* ---------- Connection to the Google Apps Script web app ---------- */
+
+    // Settings come from config.js
+    const CFG = window.ABBS_CONFIG || {};
+    const API_URL = String(CFG.API_URL || '').trim();
+    const LOGO_FILE_ID = String(CFG.LOGO_FILE_ID || '').trim();
+    const SESSION_STORE_KEY = 'abbs.finance.session';
+    const LAST_USER_KEY = 'abbs.finance.lastUser';
+    let session = null;   // { user, key } once someone is signed in
+
+    function isConnected() { return API_URL !== ''; }
+
+    // Browsers can refuse storage (private mode), so every access is guarded
+    function store(kind) {
+      try { return kind === 'local' ? window.localStorage : window.sessionStorage; } catch (e) { return null; }
+    }
+    function readSession() {
+      for (const kind of ['local', 'session']) {
+        try {
+          const raw = store(kind) && store(kind).getItem(SESSION_STORE_KEY);
+          const s = raw ? JSON.parse(raw) : null;
+          if (s && s.user && s.key) return s;
+        } catch (e) { /* ignore */ }
+      }
+      return null;
+    }
+    function clearSession() {
+      ['local', 'session'].forEach(kind => { try { store(kind) && store(kind).removeItem(SESSION_STORE_KEY); } catch (e) {} });
+    }
+    function writeSession(s, remember) {
+      clearSession();
+      try { store(remember ? 'local' : 'session').setItem(SESSION_STORE_KEY, JSON.stringify(s)); } catch (e) { /* stays signed in for this visit only */ }
+      try { store('local').setItem(LAST_USER_KEY, s.user); } catch (e) {}
+    }
+
+    // One function for every call to the server
+    async function callApi(action, payload) {
+      if (!isConnected()) throw new Error('This page is not connected to the server yet (API_URL is empty in config.js).');
+      const ctl = new AbortController();
+      const timer = setTimeout(() => ctl.abort(), 90000);
+      let res;
+      try {
+        res = await fetch(API_URL, {
+          method: 'POST',
+          // text/plain keeps this a "simple" request, so the browser skips the CORS pre-flight that Apps Script cannot answer
+          headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+          body: JSON.stringify({ action, key: session ? session.key : '', user: session ? session.user : '', payload: payload || {} }),
+          redirect: 'follow',
+          signal: ctl.signal
+        });
+      } catch (e) {
+        throw new Error(e && e.name === 'AbortError'
+          ? 'The server took too long to answer. Please try again.'
+          : 'Cannot reach the server. Check your internet connection.');
+      } finally {
+        clearTimeout(timer);
+      }
+      let out;
+      try { out = await res.json(); } catch (e) {
+        throw new Error('The server gave an unexpected answer. Check that the Apps Script web app is deployed with "Who has access: Anyone" and that API_URL in config.js is right.');
+      }
+      if (!out || !out.ok) {
+        const err = new Error((out && out.error) || 'The request failed.');
+        err.code = out && out.code;
+        throw err;
+      }
+      return out.data;
+    }
+
+    // Show an error. If the key was refused, send the person back to the sign-in screen.
+    function reportError(prefix, err) {
+      if (err && (err.code === 'AUTH' || err.code === 'LOCKED') && session) { signOut(err.message); return; }
+      alert(prefix + errText(err));
+    }
+
+    /* ---------- Sign in / sign out ---------- */
+
+    function showLogin(message) {
+      document.getElementById('login-overlay').classList.replace('hidden', 'flex');
+      document.body.classList.add('overflow-hidden');
+      const err = document.getElementById('login-error');
+      err.textContent = message || '';
+      err.classList.toggle('hidden', !message);
+      const nameEl = document.getElementById('login-user');
+      const keyEl = document.getElementById('login-key');
+      try { if (!nameEl.value) nameEl.value = store('local').getItem(LAST_USER_KEY) || ''; } catch (e) {}
+      keyEl.value = '';
+      setTimeout(() => (nameEl.value ? keyEl : nameEl).focus(), 50);
+    }
+
+    function hideLogin() {
+      document.getElementById('login-overlay').classList.replace('flex', 'hidden');
+      document.body.classList.remove('overflow-hidden');
+    }
+
+    function updateWho() {
+      const signedIn = !!session;
+      document.getElementById('who').textContent = signedIn ? session.user : '';
+      document.getElementById('who-row').classList.toggle('hidden', !signedIn);
+      document.getElementById('btn-signout').classList.toggle('hidden', !signedIn);
+    }
+
+    async function handleLogin(e) {
+      e.preventDefault();
+      const form = e.target;
+      const btn = document.getElementById('btn-login');
+      const user = form.elements.user.value.trim();
+      const key = form.elements.key.value;
+      const remember = form.elements.remember.checked;
+      if (!user || !key) return;
+
+      setBusy(btn, true, '<i class="fa-solid fa-spinner fa-spin"></i> Signing in...', 'Sign in');
+      session = { user, key };
+      try {
+        const data = await callApi('getFinanceInitialData');   // doubles as the key check
+        writeSession(session, remember);
+        form.elements.key.value = '';
+        hideLogin();
+        updateWho();
+        renderData(data);
+      } catch (err) {
+        session = null;
+        showLogin(errText(err));
+      } finally {
+        setBusy(btn, false, '', 'Sign in');
+      }
+    }
+
+    function signOut(message) {
+      clearSession();
+      session = null;
+      toggleModal('modal-issue-imprest', false);
+      renderData({});          // do not leave figures on the screen of a shared phone
+      switchTab('dashboard');
+      updateWho();
+      showLogin(typeof message === 'string' ? message : '');
+    }
+
+    /* ---------- Menu logo: the same Google Drive file the PDF receipt uses ---------- */
+
+    function driveThumbUrl(id) {
+      return 'https://drive.google.com/thumbnail?id=' + encodeURIComponent(id) + '&sz=w200';
+    }
+
+    // Try each image source in turn. If none loads, the graduation-cap icon simply stays.
+    function showBrandLogo(sources) {
+      if (!sources.length) return;
+      document.querySelectorAll('.brand-logo').forEach(img => {
+        let i = 0;
+        img.onload = () => {
+          img.classList.remove('hidden');
+          document.querySelectorAll('.brand-fallback').forEach(f => f.style.display = 'none');
+        };
+        img.onerror = () => { i++; if (i < sources.length) img.src = sources[i]; };
+        img.referrerPolicy = 'no-referrer';
+        img.src = sources[0];
+      });
+    }
+
+    // Order: (1) the image sent by the script (works even if the Drive file is private),
+    //        (2) the Drive thumbnail link for that file, (3) LOGO_FILE_ID from config.js.
+    function loadBrandLogo() {
+      const direct = LOGO_FILE_ID ? [driveThumbUrl(LOGO_FILE_ID)] : [];
+      if (!isConnected()) { showBrandLogo(direct); return; }
+      callApi('getBrandLogo')
+        .then(res => {
+          const sources = [];
+          if (res && res.dataUri && String(res.dataUri).indexOf('data:image/') === 0) sources.push(res.dataUri);
+          const id = (res && res.fileId) || LOGO_FILE_ID;
+          if (id) sources.push(driveThumbUrl(id));
+          showBrandLogo(sources);
+        })
+        .catch(() => showBrandLogo(direct));
+    }
+
+    /* ---------- Start-up ---------- */
+
+    window.addEventListener('DOMContentLoaded', () => {
+      const today = todayStr();
+      document.querySelectorAll('input[type="date"]').forEach(i => i.value = today);
+      loadBrandLogo();
+
+      if (!isConnected()) {                  // preview mode: no server yet, show demo data
+        document.getElementById('demo-banner').classList.remove('hidden');
+        renderData(DEMO_DATA);
+        return;
+      }
+      session = readSession();
+      if (session) { updateWho(); refreshData(); } else { showLogin(); }
+    });
+
+    /* ---------- Navigation & modal ---------- */
+
+    const TAB_TITLES = {
+      dashboard:        ['Dashboard',        'Financial Dashboard'],
+      'student-ledger': ['Student Fees',     'Student Fee Ledger & Receipts'],
+      inflow:           ['Income',           'General Revenue Collection'],
+      outflow:          ['Expense',          'Expense Recording'],
+      imprest:          ['Petty Cash',       'Petty Cash & Imprest Management'],
+      audit:            ['Audit Log',        'Audit Log']
+    };
+
+    function switchTab(tabId) {
+      document.querySelectorAll('.tab-view').forEach(el => el.classList.add('hidden'));
+      document.querySelectorAll('.nav-btn').forEach(el => el.classList.remove('active-nav'));
+      document.querySelectorAll('.mnav-btn').forEach(el => el.classList.remove('active-mnav'));
+
+      document.getElementById(`view-${tabId}`).classList.remove('hidden');
+      document.getElementById(`nav-${tabId}`).classList.add('active-nav');
+      const mnav = document.getElementById(`mnav-${tabId}`);
+      if (mnav) mnav.classList.add('active-mnav');
+
+      // Short title on phones, full title on larger screens
+      const t = TAB_TITLES[tabId] || ['ABBS Finance', 'ABBS Finance'];
+      document.getElementById('page-title').innerHTML =
+        `<span class="md:hidden">${esc(t[0])}</span><span class="hidden md:inline">${esc(t[1])}</span>`;
+
+      // Start each screen at the top
+      window.scrollTo(0, 0);
+      const main = document.querySelector('main');
+      if (main) main.scrollTop = 0;
+    }
+
+    function toggleModal(modalId, show) {
+      const modal = document.getElementById(modalId);
+      if (show) modal.classList.replace('hidden', 'flex');
+      else modal.classList.replace('flex', 'hidden');
+      document.body.classList.toggle('overflow-hidden', show);   // stop the page scrolling behind the sheet
+    }
+
+    function openIssueImprest() {
+      const form = document.getElementById('form-issue-imprest');
+      form.querySelector('input[name="Date"]').value = todayStr();
+      toggleModal('modal-issue-imprest', true);
+    }
+
+    /* ---------- Data loading ---------- */
+
+    // Shown only while config.js has no API_URL
+    const DEMO_DATA = {
+          categories: [
+            { CategoryID: 'CAT-001', CategoryType: 'INFLOW', CategoryName: 'School Fees' },
+            { CategoryID: 'CAT-002', CategoryType: 'INFLOW', CategoryName: 'Registration' },
+            { CategoryID: 'CAT-101', CategoryType: 'OUTFLOW', CategoryName: 'Administration' },
+            { CategoryID: 'CAT-102', CategoryType: 'OUTFLOW', CategoryName: 'Transportation' },
+            { CategoryID: 'CAT-201', CategoryType: 'TRANSFER', CategoryName: 'Imprest Funding' }
+          ],
+          cohorts: [
+            { CohortID: 'COH-2026-CERT-01', CohortName: 'Certificate Class 2026' },
+            { CohortID: 'GENERAL', CohortName: 'General ABBS' }
+          ],
+          accounts: [
+            { AccountID: 'ACC-001', AccountName: 'ABBS Cash', AccountType: 'Cash' },
+            { AccountID: 'ACC-004', AccountName: 'Administrator Imprest', AccountType: 'Imprest' }
+          ],
+          transactions: [
+            { TransactionID: 'TXN-2026-000005', Date: '2026-07-11', TransactionType: 'OUTFLOW', CategoryName: 'Transportation', CohortID: 'GENERAL', ImprestID: 'IMP-2026-0002', Status: 'POSTED', Description: 'Transport', Amount: 1000 },
+            { TransactionID: 'TXN-2026-000002', Date: '2026-07-11', TransactionType: 'TRANSFER', CategoryName: 'Imprest Funding', CohortID: 'GENERAL', ImprestID: 'IMP-2026-0002', Status: 'POSTED', Description: 'Imprest received', Amount: 10000 },
+            { TransactionID: 'TXN-2026-000001', Date: '2026-07-11', TransactionType: 'INFLOW', CategoryName: 'School Fees', CohortID: 'COH-2026-CERT-01', ImprestID: '', Status: 'POSTED', Description: '[Student: STU-2026-089 - Jane Doe] Tuition Fee', Amount: 30000 }
+          ],
+          imprests: [
+            { ImprestID: 'IMP-2026-0002', DateIssued: '2026-07-11', Recipient: 'ABBS Administrator', Purpose: 'General ABBS Expenses', AccountID: 'ACC-004', AmountIssued: 10000, AmountSettled: 1000, BalanceOutstanding: 9000, Status: 'OPEN' }
+          ],
+          audit: [
+            { AuditID: 'AUD-2026-0001', Timestamp: '2026-09-19 12:00', User: 'demo', Action: 'CREATE', RecordType: 'FinanceTransactions', RecordID: 'TXN-2026-000005', Field: '', OldValue: '', NewValue: '', Notes: 'OUTFLOW ?1,000.00 from imprest IMP-2026-0002' }
+          ]
+        };
+
+    function refreshData() {
+      if (!isConnected()) { renderData(DEMO_DATA); return Promise.resolve(); }
+      if (!session) return Promise.resolve();
+      return callApi('getFinanceInitialData')
+        .then(renderData)
+        .catch(err => reportError('Could not load data: ', err));
+    }
+
+    function renderData(data) {
+      appState = Object.assign({ accounts: [], categories: [], cohorts: [], transactions: [], imprests: [], audit: [] }, data || {});
+      populateDropdowns();
+      renderDashboard();
+      renderImprestTable();
+      renderStudentLedgerTable();
+      renderAuditTable();
+    }
+
+    function optionsHtml(items, valueKey, labelFn, emptyText) {
+      return items.length > 0
+        ? items.map(i => `<option value="${esc(i[valueKey])}">${esc(labelFn(i))}</option>`).join('')
+        : `<option value="">${esc(emptyText)}</option>`;
+    }
+
+    // Replace a select's options but keep the current choice if it still exists
+    function setOptions(id, html) {
+      const el = document.getElementById(id);
+      if (!el) return;
+      const prev = el.value;
+      el.innerHTML = html;
+      if (prev && Array.from(el.options).some(o => o.value === prev)) el.value = prev;
+    }
+
+    function populateDropdowns() {
+      const cohorts = appState.cohorts || [];
+      const accounts = appState.accounts || [];
+      const categories = appState.categories || [];
+
+      const cohortOptions = optionsHtml(cohorts, 'CohortID', c => c.CohortName || c.CohortID, 'No Cohorts Available');
+      ['inflow-cohort-select', 'outflow-cohort-select', 'student-cohort-select', 'imprest-cohort-select']
+        .forEach(id => setOptions(id, cohortOptions));
+
+      const accountOptions = optionsHtml(accounts, 'AccountID', a => a.AccountName || a.AccountID, 'No Accounts Available');
+      ['inflow-account-select', 'outflow-account-select', 'student-account-select']
+        .forEach(id => setOptions(id, accountOptions));
+
+      // The imprest modal only lists imprest-type accounts (falls back to all accounts)
+      const imprestAccounts = accounts.filter(a => String(a.AccountType).toLowerCase() === 'imprest');
+      setOptions('imprest-account-select', optionsHtml(imprestAccounts.length ? imprestAccounts : accounts,
+        'AccountID', a => a.AccountName || a.AccountID, 'No Accounts Available'));
+
+      // Default the imprest cohort to GENERAL when it exists
+      const impCohort = document.getElementById('imprest-cohort-select');
+      if (impCohort && !impCohort.dataset.init && cohorts.some(c => c.CohortID === 'GENERAL')) {
+        impCohort.value = 'GENERAL';
+        impCohort.dataset.init = '1';
+      }
+
+      const byType = t => categories.filter(c => String(c.CategoryType || '').toUpperCase() === t);
+      setOptions('inflow-category-select',
+        optionsHtml(byType('INFLOW'), 'CategoryID', c => c.CategoryName || c.CategoryID, 'No Inflow Categories'));
+      setOptions('outflow-category-select',
+        optionsHtml(byType('OUTFLOW'), 'CategoryID', c => c.CategoryName || c.CategoryID, 'No Outflow Categories'));
+
+      // Imprests that still have money to spend
+      const openImprests = (appState.imprests || []).filter(i => Number(i.BalanceOutstanding) > 0);
+      const imprestSelect = document.getElementById('outflow-imprest-select');
+      if (imprestSelect) {
+        const prev = imprestSelect.value;
+        imprestSelect.innerHTML = '<option value="">Not from an imprest</option>' +
+          openImprests.map(i => `<option value="${esc(i.ImprestID)}">${esc(i.ImprestID)}   ${esc(i.Recipient)}   ${esc(money(i.BalanceOutstanding))} left</option>`).join('');
+        if (prev && openImprests.some(i => i.ImprestID === prev)) imprestSelect.value = prev;
+      }
+      onImprestSelected();
+    }
+
+    /* ---------- Expense form: paying from an imprest ---------- */
+
+    function onImprestSelected() {
+      const sel = document.getElementById('outflow-imprest-select');
+      const acct = document.getElementById('outflow-account-select');
+      const hint = document.getElementById('outflow-imprest-hint');
+      const method = document.getElementById('outflow-method-select');
+      if (!sel || !acct || !hint) return;
+
+      const imp = (appState.imprests || []).find(i => i.ImprestID === sel.value);
+      if (imp) {
+        if (Array.from(acct.options).some(o => o.value === imp.AccountID)) acct.value = imp.AccountID;
+        acct.disabled = true;   // the account follows the imprest automatically
+        if (method) method.value = 'Cash';
+        hint.innerHTML = `Balance left: <strong>${esc(money(imp.BalanceOutstanding))}</strong>. The account is set to the imprest's account automatically.`;
+        hint.classList.remove('hidden');
+      } else {
+        acct.disabled = false;
+        hint.classList.add('hidden');
+      }
+    }
+
+    // "Record expense" button on an imprest row
+    function startImprestExpense(imprestId) {
+      switchTab('outflow');
+      const sel = document.getElementById('outflow-imprest-select');
+      sel.value = imprestId;
+      onImprestSelected();
+    }
+
+    /* ---------- Rendering ---------- */
+
+    const TYPE_BADGE = {
+      INFLOW: 'bg-emerald-100 text-emerald-800',
+      OUTFLOW: 'bg-rose-100 text-rose-800',
+      TRANSFER: 'bg-gold-100 text-gold-800'
+    };
+    const TYPE_TEXT = { INFLOW: 'text-emerald-600', OUTFLOW: 'text-rose-600', TRANSFER: 'text-gold-700' };
+    const STATUS_BADGE = {
+      ISSUED: 'bg-navy-100 text-navy-800',
+      OPEN: 'bg-gold-100 text-gold-800',
+      SETTLED: 'bg-emerald-100 text-emerald-800',
+      OVERSPENT: 'bg-red-100 text-red-800'
+    };
+
+    function renderDashboard() {
+      let revenue = 0;
+      let expenses = 0;
+
+      const tbody = document.getElementById('dashboard-txn-tbody');
+      const txns = appState.transactions || [];
+
+      // Only POSTED entries count. TRANSFER (imprest funding) is neither revenue nor expense.
+      txns.forEach(t => {
+        if (t.Status !== 'POSTED') return;
+        const amt = parseFloat(t.Amount) || 0;
+        if (t.TransactionType === 'INFLOW') revenue += amt;
+        if (t.TransactionType === 'OUTFLOW') expenses += amt;
+      });
+
+      if (txns.length === 0) {
+        tbody.innerHTML = '<tr><td colspan="7" class="p-4 text-center text-navy-400">No recent transactions recorded.</td></tr>';
+      } else {
+        tbody.innerHTML = txns.slice(0, 50).map(t => {
+          const voided = t.Status === 'VOID';
+          const type = String(t.TransactionType || '').toUpperCase();
+          return `<tr class="${voided ? 'text-navy-400 line-through' : ''}">
+            <td data-label="Txn ID" class="p-3 font-mono text-xs font-bold ${voided ? '' : 'text-navy-700'}">${esc(t.TransactionID)}</td>
+            <td data-label="Date" class="p-3">${fmtDate(t.Date)}</td>
+            <td data-label="Type" class="p-3"><span class="px-2 py-0.5 rounded text-xs font-bold ${TYPE_BADGE[type] || 'bg-navy-100 text-navy-800'}">${esc(type)}</span>${voided ? ' <span class="text-xs font-bold">VOID</span>' : (t.Status && t.Status !== 'POSTED' ? ` <span class="text-xs font-bold text-navy-600">${esc(t.Status)}</span>` : '')}</td>
+            <td data-label="Category" class="p-3">${esc(t.CategoryName || t.CategoryID)}</td>
+            <td data-label="Cohort" class="p-3 text-navy-600 m-hide">${esc(t.CohortID)}</td>
+            <td data-label="Imprest" class="p-3 font-mono text-xs text-navy-600 ${t.ImprestID ? '' : 'm-hide'}">${esc(t.ImprestID || '')}</td>
+            <td data-label="Amount" class="p-3 text-right font-bold ${voided ? '' : (TYPE_TEXT[type] || 'text-navy-800')}">${esc(money(t.Amount))}</td>
+          </tr>`;
+        }).join('');
+      }
+
+      // Money still held across all imprests (an overspent imprest reduces the total)
+      const imprestBal = (appState.imprests || []).reduce((sum, i) => sum + (parseFloat(i.BalanceOutstanding) || 0), 0);
+
+      document.getElementById('stat-revenue').innerText = money(revenue);
+      document.getElementById('stat-expenses').innerText = money(expenses);
+      document.getElementById('stat-imprest').innerText = money(imprestBal);
+      document.getElementById('stat-net').innerText = money(revenue - expenses);
+    }
+
+    function renderStudentLedgerTable() {
+      const tbody = document.getElementById('student-ledger-tbody');
+      if (!tbody) return;
+
+      // Only POSTED inflows recorded through the Student Fee form (description starts with "[Student:")
+      const feeTxns = (appState.transactions || []).filter(t =>
+        t.TransactionType === 'INFLOW' && t.Status === 'POSTED' && String(t.Description || '').startsWith('[Student:')
+      );
+
+      if (feeTxns.length === 0) {
+        tbody.innerHTML = `<tr><td colspan="5" class="p-4 text-center text-navy-400">No student payments recorded yet.</td></tr>`;
+        return;
+      }
+
+      tbody.innerHTML = feeTxns.map(t => `
+        <tr>
+          <td data-label="Txn ID" class="p-3 font-mono text-xs font-bold text-navy-700">${esc(t.TransactionID)}</td>
+          <td data-label="Date" class="p-3">${fmtDate(t.Date)}</td>
+          <td data-label="Student" class="p-3">
+            <div class="font-semibold text-navy-900">${esc(t.Description)}</div>
+          </td>
+          <td data-label="Cohort" class="p-3 text-navy-600">${esc(t.CohortID)}</td>
+          <td data-label="Amount" class="p-3 text-right font-bold text-emerald-600">${esc(money(t.Amount))}</td>
+        </tr>
+      `).join('');
+    }
+
+    function renderImprestTable() {
+      const tbody = document.getElementById('imprest-tbody');
+      const list = appState.imprests || [];
+      if (list.length === 0) {
+        tbody.innerHTML = `<tr><td colspan="9" class="p-4 text-center text-navy-400">No imprests issued yet.</td></tr>`;
+        return;
+      }
+      tbody.innerHTML = list.map(i => {
+        const canSpend = Number(i.BalanceOutstanding) > 0;
+        return `<tr>
+          <td data-label="Imprest" class="p-3 font-mono text-xs font-bold">${esc(i.ImprestID)}</td>
+          <td data-label="Issued on" class="p-3">${fmtDate(i.DateIssued)}</td>
+          <td data-label="Recipient" class="p-3 font-semibold">${esc(i.Recipient)}</td>
+          <td data-label="Purpose" class="p-3 text-navy-700">${esc(i.Purpose)}</td>
+          <td data-label="Issued" class="p-3 text-right font-bold">${esc(money(i.AmountIssued))}</td>
+          <td data-label="Spent" class="p-3 text-right">${esc(money(i.AmountSettled))}</td>
+          <td data-label="Outstanding" class="p-3 text-right font-bold ${Number(i.BalanceOutstanding) < 0 ? 'text-red-600' : 'text-gold-700'}">${esc(money(i.BalanceOutstanding))}</td>
+          <td data-label="Status" class="p-3"><span class="px-2 py-0.5 rounded text-xs font-bold ${STATUS_BADGE[i.Status] || 'bg-navy-100 text-navy-800'}">${esc(i.Status)}</span></td>
+          <td class="actions p-3 text-right">${canSpend ? `<button onclick="startImprestExpense('${esc(i.ImprestID)}')" class="text-xs font-semibold text-navy-800 bg-gold-50 hover:bg-gold-100 border border-gold-300 rounded px-2.5 py-1 transition whitespace-nowrap">Record expense</button>` : ''}</td>
+        </tr>`;
+      }).join('');
+    }
+
+    function renderAuditTable() {
+      const tbody = document.getElementById('audit-tbody');
+      const list = appState.audit || [];
+      if (list.length === 0) {
+        tbody.innerHTML = `<tr><td colspan="7" class="p-4 text-center text-navy-400">No audit entries yet.</td></tr>`;
+        return;
+      }
+      tbody.innerHTML = list.map(a => {
+        const change = a.Field
+          ? `${esc(a.Field)}: ${esc(a.OldValue || '(blank)')} &rarr; ${esc(a.NewValue || '(blank)')}`
+          : esc(a.Notes || '');
+        return `<tr>
+          <td data-label="Audit ID" class="p-3 font-mono text-xs font-bold text-navy-700">${esc(a.AuditID)}</td>
+          <td data-label="Time" class="p-3 whitespace-nowrap">${esc(a.Timestamp)}</td>
+          <td data-label="User" class="p-3 text-navy-700">${esc(a.User)}</td>
+          <td data-label="Action" class="p-3"><span class="px-2 py-0.5 rounded text-xs font-bold bg-navy-100 text-navy-800">${esc(a.Action)}</span></td>
+          <td data-label="Record type" class="p-3">${esc(a.RecordType)}</td>
+          <td data-label="Record ID" class="p-3 font-mono text-xs">${esc(a.RecordID)}</td>
+          <td data-label="Details" class="p-3 text-navy-700">${change}</td>
+        </tr>`;
+      }).join('');
+    }
+
+    /* ---------- Form handlers ---------- */
+
+    // General Inflow + Expense forms
+    async function handleTransactionSubmit(e, type) {
+      e.preventDefault();
+      const form = e.target;
+      const btn = form.querySelector('button[type="submit"]');
+      const originalLabel = btn.innerHTML;
+      const busyLabel = '<i class="fa-solid fa-spinner fa-spin"></i> Saving...';
+
+      // A disabled Account select (imprest expense) is left out on purpose: the server uses the imprest's account.
+      const data = Object.fromEntries(new FormData(form).entries());
+      data.TransactionType = type;
+
+      if (!isConnected()) { alert('Demo Mode: ' + type + ' record simulated.'); return; }
+
+      setBusy(btn, true, busyLabel, originalLabel);
+      try {
+        let res = await callApi('saveTransaction', data);
+
+        // The expense is bigger than the imprest balance: ask before saving
+        if (res && res.status === 'CONFIRM') {
+          setBusy(btn, false, busyLabel, originalLabel);
+          if (!confirm(res.message + '\n\nRecord it anyway?')) return;
+          setBusy(btn, true, busyLabel, originalLabel);
+          data.ConfirmOverspend = 'YES';
+          res = await callApi('saveTransaction', data);
+        }
+
+        if (res && res.status === 'SUCCESS') {
+          alert('Saved! Transaction ID: ' + res.transactionID);
+          form.reset();
+          form.querySelector('input[type="date"]').value = todayStr();
+          onImprestSelected();
+          refreshData();
+        } else {
+          alert('Save failed. Please try again.');
+        }
+      } catch (err) {
+        reportError('Error saving: ', err);
+      } finally {
+        setBusy(btn, false, busyLabel, originalLabel);
+      }
+    }
+
+    // Issue Imprest modal
+    async function handleIssueImprest(e) {
+      e.preventDefault();
+      const form = e.target;
+      const btn = form.querySelector('button[type="submit"]');
+      const originalLabel = btn.innerHTML;
+
+      const data = Object.fromEntries(new FormData(form).entries());
+
+      if (!isConnected()) { alert('Demo Mode: Imprest issue simulated.'); return; }
+
+      setBusy(btn, true, 'Issuing...', originalLabel);
+      try {
+        const res = await callApi('issueImprest', data);
+        if (res && res.status === 'SUCCESS') {
+          alert('Imprest issued: ' + res.imprestID + '\nFunding entry: ' + res.fundingTransactionID);
+          form.reset();
+          toggleModal('modal-issue-imprest', false);
+          refreshData();
+        } else {
+          alert('Could not issue imprest. Please try again.');
+        }
+      } catch (err) {
+        reportError('Error: ', err);
+      } finally {
+        setBusy(btn, false, 'Issuing...', originalLabel);
+      }
+    }
+
+    // Student fee form (saves the payment and downloads a PDF receipt)
+    async function handleStudentFeeSubmit(e) {
+      e.preventDefault();
+      const form = e.target;
+      const btn = document.getElementById('btn-submit-student-fee');
+      const originalLabel = `<i class="fa-solid fa-file-pdf"></i> Save & Generate PDF Receipt`;
+      const busyLabel = `<i class="fa-solid fa-spinner fa-spin"></i> Generating Receipt...`;
+
+      const data = Object.fromEntries(new FormData(form).entries());
+
+      if (!isConnected()) { alert('Demo Mode: Direct PDF download simulated.'); return; }
+
+      setBusy(btn, true, busyLabel, originalLabel);
+      try {
+        const res = await callApi('recordStudentFeePayment', data);
+        if (res && res.status === 'SUCCESS') {
+          if (res.pdfBase64) {
+            downloadBase64File(res.pdfBase64, res.fileName || 'Receipt.pdf');
+            alert('Fee recorded (' + res.txnId + '). The PDF receipt is downloading. Check your Downloads folder or notifications.');
+          } else {
+            alert('Fee recorded (' + res.txnId + '), but the receipt could not be created:\n' +
+                  (res.pdfError || 'unknown error') + '\n\nThe payment is saved. Do not enter it again.');
+          }
+          form.reset();
+          form.querySelector('input[type="date"]').value = todayStr();
+          refreshData();
+        } else {
+          alert('Save failed. Please try again.');
+        }
+      } catch (err) {
+        reportError('Error: ', err);
+      } finally {
+        setBusy(btn, false, busyLabel, originalLabel);
+      }
+    }
+
+    // Download a PDF from Base64 data. A Blob link is more reliable than a data: link on Android Chrome.
+    function downloadBase64File(base64Data, fileName) {
+      const bytes = atob(base64Data);
+      const arr = new Uint8Array(bytes.length);
+      for (let i = 0; i < bytes.length; i++) arr[i] = bytes.charCodeAt(i);
+      const url = URL.createObjectURL(new Blob([arr], { type: 'application/pdf' }));
+
+      const downloadLink = document.createElement('a');
+      downloadLink.href = url;
+      downloadLink.download = fileName;
+      document.body.appendChild(downloadLink);
+      downloadLink.click();
+      document.body.removeChild(downloadLink);
+      setTimeout(() => URL.revokeObjectURL(url), 30000);
+    }
+
+    function filterStudentLedger() {
+      const query = document.getElementById('ledger-search').value.toLowerCase();
+      const rows = document.querySelectorAll('#student-ledger-tbody tr');
+
+      rows.forEach(row => {
+        const text = row.innerText.toLowerCase();
+        row.style.display = text.includes(query) ? '' : 'none';
+      });
+    }
+  </script>
+</body>
+</html>
