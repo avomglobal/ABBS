@@ -1,0 +1,407 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="theme-color" content="#0B1F3A">
+  <meta name="robots" content="noindex, nofollow">
+  <title>ABBS Portal</title>
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Ctext y='.9em' font-size='90'%3E%F0%9F%8F%AB%3C/text%3E%3C/svg%3E">
+
+  <style>
+    :root {
+      --navy-900: #0B1F3A; --navy-800: #122A4D; --navy-700: #1B3560; --navy-600: #274677;
+      --navy-400: #5F7BAD; --navy-200: #C2CEE3; --navy-100: #E3E9F3; --navy-50: #F2F5FA;
+      --gold-500: #B8941F; --gold-400: #D4AF37; --gold-300: #E6CB5F; --gold-50: #FCF8E8;
+      --bar: 56px;
+    }
+    * { box-sizing: border-box; }
+    [hidden] { display: none !important; }
+    html, body { height: 100%; margin: 0; }
+    body {
+      display: flex; flex-direction: column; height: 100vh; height: 100dvh;
+      font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+      color: var(--navy-900); background: var(--navy-50);
+      -webkit-text-size-adjust: 100%; -webkit-tap-highlight-color: transparent;
+    }
+    a, button { touch-action: manipulation; }
+    :focus-visible { outline: 3px solid var(--gold-400); outline-offset: 2px; }
+
+    /* ---------- icons ---------- */
+    .ic { width: 1.5rem; height: 1.5rem; fill: none; stroke: currentColor; stroke-width: 2;
+          stroke-linecap: round; stroke-linejoin: round; flex: none; }
+
+    /* ---------- top bar ---------- */
+    .topbar {
+      flex: none; position: relative; z-index: 30;
+      display: flex; align-items: center; gap: 10px;
+      height: calc(var(--bar) + env(safe-area-inset-top));
+      padding: env(safe-area-inset-top) max(10px, env(safe-area-inset-right)) 0 max(8px, env(safe-area-inset-left));
+      background: var(--navy-900); color: #fff; border-bottom: 3px solid var(--gold-400);
+    }
+    .iconbtn {
+      width: 44px; height: 44px; flex: none; display: inline-flex; align-items: center; justify-content: center;
+      border: 0; border-radius: 10px; background: transparent; color: inherit; cursor: pointer; text-decoration: none;
+    }
+    .iconbtn:hover { background: rgba(255, 255, 255, .12); }
+    .brand { display: flex; align-items: center; gap: 10px; min-width: 0; flex: 1; }
+    .brand-title { font-weight: 700; font-size: 1.05rem; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .logo-tile {
+      width: 36px; height: 36px; flex: none; display: flex; align-items: center; justify-content: center;
+      border-radius: 9px; background: var(--gold-400); color: var(--navy-900);
+    }
+    .logo-tile .ic { width: 1.35rem; height: 1.35rem; }
+    .brand-logo {
+      height: 36px; width: auto; max-width: 64px; object-fit: contain; flex: none;
+      background: #fff; border-radius: 9px; padding: 3px; box-shadow: 0 0 0 2px var(--gold-400);
+    }
+
+    /* thin gold loading line under the top bar */
+    #bar { position: absolute; left: 0; right: 0; bottom: -3px; height: 3px; overflow: hidden; opacity: 0; transition: opacity .2s; pointer-events: none; }
+    #bar::before { content: ""; position: absolute; inset: 0 auto 0 0; width: 35%; background: #fff; animation: slide 1s ease-in-out infinite; }
+    body.loading #bar { opacity: 1; }
+    @keyframes slide { 0% { left: -35%; } 100% { left: 100%; } }
+
+    /* ---------- menu drawer ---------- */
+    #scrim {
+      position: fixed; inset: 0; z-index: 40; background: rgba(7, 21, 42, .6);
+      opacity: 0; visibility: hidden; transition: opacity .2s, visibility 0s .2s;
+    }
+    #drawer {
+      position: fixed; top: 0; bottom: 0; left: 0; z-index: 50; width: min(320px, 86vw);
+      display: flex; flex-direction: column; background: var(--navy-900); color: #fff;
+      padding-top: env(safe-area-inset-top); padding-bottom: env(safe-area-inset-bottom);
+      box-shadow: 8px 0 30px rgba(0, 0, 0, .35);
+      transform: translateX(-102%); visibility: hidden; transition: transform .25s ease, visibility 0s .25s;
+    }
+    body.menu-open #scrim { opacity: 1; visibility: visible; transition-delay: 0s; }
+    body.menu-open #drawer { transform: none; visibility: visible; transition: transform .25s ease; }
+    .drawer-head { display: flex; align-items: center; gap: 10px; padding: 8px 8px 8px 14px; min-height: var(--bar); border-bottom: 1px solid var(--navy-800); }
+    .drawer-head .brand-title { flex: 1; }
+    .drawer-label { padding: 16px 18px 6px; font-size: .72rem; letter-spacing: .08em; text-transform: uppercase; color: var(--navy-400); font-weight: 700; }
+    #menu-list { list-style: none; margin: 0; padding: 0 10px; overflow-y: auto; }
+    .navlink {
+      display: flex; align-items: center; gap: 14px; min-height: 50px; padding: 10px 12px; margin: 2px 0;
+      border-radius: 10px; border-left: 4px solid transparent; color: var(--navy-100); text-decoration: none; font-weight: 600;
+    }
+    .navlink .ic { color: var(--gold-400); }
+    .navlink:hover { background: var(--navy-800); }
+    .navlink[aria-current="page"] { background: var(--navy-800); border-left-color: var(--gold-400); color: #fff; }
+    .drawer-foot { margin-top: auto; padding: 14px 18px; font-size: .78rem; color: var(--navy-400); border-top: 1px solid var(--navy-800); }
+
+    /* ---------- stage: home page + app frames ---------- */
+    #stage { position: relative; flex: 1; min-height: 0; }
+    .pane { position: absolute; inset: 0; width: 100%; height: 100%; }
+    iframe.pane { border: 0; background: var(--navy-50); }
+    #home { overflow-y: auto; -webkit-overflow-scrolling: touch; }
+
+    .hero {
+      background: linear-gradient(135deg, var(--navy-900) 0%, var(--navy-800) 60%, var(--navy-700) 100%);
+      color: #fff; padding: 36px 20px 84px; border-bottom: 4px solid var(--gold-400);
+    }
+    .hero-inner { max-width: 1040px; margin: 0 auto; }
+    .eyebrow { margin: 0 0 8px; color: var(--gold-300); font-size: .8rem; letter-spacing: .12em; text-transform: uppercase; font-weight: 700; }
+    .hero h1 { margin: 0; font-size: clamp(1.7rem, 5vw, 2.5rem); line-height: 1.15; }
+    .lead { margin: 12px 0 0; max-width: 34rem; color: var(--navy-200); font-size: 1rem; line-height: 1.5; }
+    .lead .ic { width: 1.1rem; height: 1.1rem; vertical-align: -0.2em; color: var(--gold-300); }
+
+    .wrap { max-width: 1040px; margin: -56px auto 0; padding: 0 20px 28px; }
+    .cards { display: grid; gap: 16px; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); }
+    .card {
+      display: flex; flex-direction: column; gap: 10px; padding: 20px; min-height: 190px;
+      background: #fff; color: var(--navy-900); text-decoration: none;
+      border: 1px solid var(--navy-100); border-top: 4px solid var(--navy-100); border-radius: 16px;
+      box-shadow: 0 1px 2px rgba(11, 31, 58, .06), 0 8px 20px rgba(11, 31, 58, .06);
+      transition: transform .15s, box-shadow .15s, border-top-color .15s;
+    }
+    .card:hover { transform: translateY(-3px); border-top-color: var(--gold-400); box-shadow: 0 12px 28px rgba(11, 31, 58, .14); }
+    .card-icon { width: 54px; height: 54px; display: flex; align-items: center; justify-content: center; border-radius: 14px; background: var(--navy-900); color: var(--gold-400); }
+    .card-icon .ic { width: 1.7rem; height: 1.7rem; }
+    .card h2 { margin: 4px 0 0; font-size: 1.2rem; }
+    .card p { margin: 0; color: var(--navy-600); font-size: .93rem; line-height: 1.45; }
+    .card .open { margin-top: auto; display: flex; align-items: center; gap: 8px; color: var(--navy-700); font-weight: 700; font-size: .92rem; }
+    .card .open .ic { width: 1.1rem; height: 1.1rem; transition: transform .15s; }
+    .card:hover .open .ic { transform: translateX(4px); }
+    .foot { margin: 28px 0 0; text-align: center; color: var(--navy-400); font-size: .8rem; }
+
+    /* ---------- "cannot find this app" panel ---------- */
+    #status { display: flex; align-items: center; justify-content: center; padding: 20px; background: var(--navy-50); overflow-y: auto; }
+    .status-card { max-width: 30rem; background: #fff; border: 1px solid var(--navy-100); border-top: 4px solid var(--gold-400); border-radius: 16px; padding: 24px; text-align: center; box-shadow: 0 8px 24px rgba(11, 31, 58, .1); }
+    .status-card h2 { margin: 0 0 8px; font-size: 1.25rem; }
+    .status-card p { margin: 0 0 16px; color: var(--navy-600); line-height: 1.5; }
+    .status-card code { background: var(--gold-50); border: 1px solid #F0DE93; border-radius: 6px; padding: 1px 6px; font-size: .9em; word-break: break-all; }
+    .btns { display: flex; flex-wrap: wrap; gap: 10px; justify-content: center; }
+    .btn { min-height: 46px; padding: 0 18px; border-radius: 10px; border: 1px solid var(--navy-200); background: #fff; color: var(--navy-800); font: inherit; font-weight: 700; cursor: pointer; }
+    .btn.primary { background: var(--gold-400); border-color: var(--gold-400); color: var(--navy-900); }
+    .btn:hover { filter: brightness(.96); }
+
+    @media (min-width: 768px) {
+      .hero { padding: 52px 32px 96px; }
+      .wrap { padding: 0 32px 40px; }
+      .brand-title { font-size: 1.15rem; }
+    }
+    @media (prefers-reduced-motion: reduce) {
+      * { transition: none !important; animation: none !important; }
+    }
+  </style>
+</head>
+<body>
+
+  <!-- Icon library (drawn once, reused everywhere) -->
+  <svg width="0" height="0" style="position:absolute" aria-hidden="true" focusable="false">
+    <symbol id="i-menu" viewBox="0 0 24 24"><path d="M4 6h16M4 12h16M4 18h16"/></symbol>
+    <symbol id="i-close" viewBox="0 0 24 24"><path d="M6 6l12 12M18 6L6 18"/></symbol>
+    <symbol id="i-home" viewBox="0 0 24 24"><path d="M3 11l9-8 9 8"/><path d="M5 10v10h5v-6h4v6h5V10"/></symbol>
+    <symbol id="i-reload" viewBox="0 0 24 24"><path d="M21 12a9 9 0 1 1-2.6-6.4"/><path d="M21 4v5h-5"/></symbol>
+    <symbol id="i-external" viewBox="0 0 24 24"><path d="M14 4h6v6"/><path d="M20 4l-9 9"/><path d="M18 14v5a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V7a1 1 0 0 1 1-1h5"/></symbol>
+    <symbol id="i-arrow" viewBox="0 0 24 24"><path d="M5 12h14"/><path d="M13 6l6 6-6 6"/></symbol>
+    <symbol id="i-cap" viewBox="0 0 24 24"><path d="M2 9l10-5 10 5-10 5z"/><path d="M6 11.5V16c0 1.5 2.7 3 6 3s6-1.5 6-3v-4.5"/><path d="M22 9v6"/></symbol>
+    <symbol id="i-calendar" viewBox="0 0 24 24"><rect x="3" y="5" width="18" height="16" rx="2"/><path d="M8 3v4M16 3v4M3 10h18"/><path d="M9 15l2 2 4-4"/></symbol>
+    <symbol id="i-cash" viewBox="0 0 24 24"><rect x="2" y="6" width="20" height="12" rx="2"/><circle cx="12" cy="12" r="3"/><path d="M6 12h.01M18 12h.01"/></symbol>
+    <symbol id="i-grid" viewBox="0 0 24 24"><rect x="4" y="4" width="6.5" height="6.5" rx="1.5"/><rect x="13.5" y="4" width="6.5" height="6.5" rx="1.5"/><rect x="4" y="13.5" width="6.5" height="6.5" rx="1.5"/><rect x="13.5" y="13.5" width="6.5" height="6.5" rx="1.5"/></symbol>
+  </svg>
+
+  <!-- TOP BAR -->
+  <header class="topbar">
+    <button id="menu-btn" class="iconbtn" type="button" aria-label="Open menu" aria-expanded="false" aria-controls="drawer">
+      <svg class="ic"><use href="#i-menu"/></svg>
+    </button>
+    <div class="brand">
+      <span class="logo-tile brand-fallback"><svg class="ic"><use href="#i-cap"/></svg></span>
+      <img class="brand-logo" alt="ABBS logo" hidden>
+      <span id="page-title" class="brand-title">ABBS Portal</span>
+    </div>
+    <button id="reload-btn" class="iconbtn" type="button" aria-label="Reload this app" title="Reload this app" hidden>
+      <svg class="ic"><use href="#i-reload"/></svg>
+    </button>
+    <a id="newtab-btn" class="iconbtn" href="#" target="_blank" rel="noopener" aria-label="Open this app in a new tab" title="Open this app in a new tab" hidden>
+      <svg class="ic"><use href="#i-external"/></svg>
+    </a>
+    <div id="bar" aria-hidden="true"></div>
+  </header>
+
+  <!-- MENU DRAWER -->
+  <div id="scrim"></div>
+  <nav id="drawer" aria-label="Portal menu" aria-hidden="true">
+    <div class="drawer-head">
+      <span class="logo-tile brand-fallback"><svg class="ic"><use href="#i-cap"/></svg></span>
+      <img class="brand-logo" alt="" hidden>
+      <span class="brand-title">ABBS Portal</span>
+      <button id="close-btn" class="iconbtn" type="button" aria-label="Close menu"><svg class="ic"><use href="#i-close"/></svg></button>
+    </div>
+    <div class="drawer-label">Switch to</div>
+    <ul id="menu-list"></ul>
+    <div class="drawer-foot">Each app keeps its own sign-in and its place, so you can switch back and forth freely.</div>
+  </nav>
+
+  <!-- STAGE: landing page and the apps -->
+  <main id="stage">
+    <section id="home" class="pane" aria-label="Portal home">
+      <div class="hero">
+        <div class="hero-inner">
+          <p class="eyebrow">ABBS Portal</p>
+          <h1>Welcome to the ABBS Portal</h1>
+          <p class="lead">Pick a workspace below. You can switch between them at any time with the menu button
+            <svg class="ic"><use href="#i-menu"/></svg> at the top left.</p>
+        </div>
+      </div>
+      <div class="wrap">
+        <div id="cards" class="cards"></div>
+        <p class="foot">&copy; <span id="year"></span> ABBS</p>
+      </div>
+    </section>
+
+    <div id="frames"></div>
+
+    <section id="status" class="pane" hidden aria-live="polite"></section>
+  </main>
+
+  <script>
+    /* ============================================================
+     * EDIT HERE: the apps in your portal
+     * ------------------------------------------------------------
+     * id          short name used in the address (index.html#finance)
+     * name        shown in the menu and on the home page
+     * path        the HTML file of the app, relative to this index.html
+     * icon        cap | calendar | cash | grid
+     * description one line shown on the home page card
+     * To add an app, copy one line and change it. Order here = order in the menu.
+     * ============================================================ */
+    const MODULES = [
+      { id: 'sis',        name: 'Student SIS', path: 'student.html',        icon: 'cap',      description: 'Student records, enrolment and profiles.' },
+      { id: 'attendance', name: 'Attendance',  path: 'attendance.html', icon: 'calendar', description: 'Daily registers and attendance tracking.' },
+      { id: 'finance',    name: 'Finance',     path: 'finance.html',    icon: 'cash',     description: 'Fees, expenses, petty cash and receipts.' }
+    ];
+
+    /* Logo: tried in this order, and the graduation-cap icon stays if none loads.
+       Best: save your logo in the same folder as this file as logo.png. */
+    const LOGO_SOURCES = [
+      'logo.png',
+      'https://drive.google.com/thumbnail?id=1_WOuCpKK8wK2xyQ7b4hb4G6A7uOV8TFB&sz=w200'
+    ];
+
+    /* ============================================================
+     * Nothing below needs editing
+     * ============================================================ */
+    const $ = id => document.getElementById(id);
+    const esc = s => String(s == null ? '' : s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+    const icon = key => `<svg class="ic" aria-hidden="true"><use href="#i-${['cap', 'calendar', 'cash', 'grid'].includes(key) ? key : 'grid'}"/></svg>`;
+
+    const home = $('home'), frames = $('frames'), status = $('status');
+    const menuBtn = $('menu-btn'), drawer = $('drawer'), pageTitle = $('page-title');
+    const reloadBtn = $('reload-btn'), newTabBtn = $('newtab-btn');
+    const frameById = {};
+    let current = null;      // the module on screen, or null for the home page
+    let openToken = 0;
+
+    /* ---------- build the menu and the home cards from MODULES ---------- */
+    $('menu-list').innerHTML =
+      `<li><a class="navlink" href="#home" data-id="home"><svg class="ic" aria-hidden="true"><use href="#i-home"/></svg><span>Home</span></a></li>` +
+      MODULES.map(m => `<li><a class="navlink" href="#${esc(m.id)}" data-id="${esc(m.id)}">${icon(m.icon)}<span>${esc(m.name)}</span></a></li>`).join('');
+
+    $('cards').innerHTML = MODULES.map(m => `
+      <a class="card" href="#${esc(m.id)}">
+        <span class="card-icon">${icon(m.icon)}</span>
+        <h2>${esc(m.name)}</h2>
+        <p>${esc(m.description)}</p>
+        <span class="open">Open <svg class="ic" aria-hidden="true"><use href="#i-arrow"/></svg></span>
+      </a>`).join('');
+    $('year').textContent = new Date().getFullYear();
+
+    /* ---------- logo ---------- */
+    document.querySelectorAll('.brand-logo').forEach(img => {
+      let i = 0;
+      img.onload = () => {
+        img.hidden = false;
+        document.querySelectorAll('.brand-fallback').forEach(f => f.hidden = true);
+      };
+      img.onerror = () => { i++; if (i < LOGO_SOURCES.length) img.src = LOGO_SOURCES[i]; };
+      img.referrerPolicy = 'no-referrer';
+      img.src = LOGO_SOURCES[0];
+    });
+
+    /* ---------- menu drawer ---------- */
+    function openMenu() {
+      document.body.classList.add('menu-open');
+      drawer.setAttribute('aria-hidden', 'false');
+      menuBtn.setAttribute('aria-expanded', 'true');
+      const target = drawer.querySelector('.navlink[aria-current="page"]') || drawer.querySelector('.navlink');
+      setTimeout(() => target && target.focus(), 30);
+    }
+    function closeMenu() {
+      const hadFocus = drawer.contains(document.activeElement);
+      document.body.classList.remove('menu-open');
+      drawer.setAttribute('aria-hidden', 'true');
+      menuBtn.setAttribute('aria-expanded', 'false');
+      if (hadFocus) menuBtn.focus();
+    }
+    const menuIsOpen = () => document.body.classList.contains('menu-open');
+
+    menuBtn.addEventListener('click', () => (menuIsOpen() ? closeMenu() : openMenu()));
+    $('close-btn').addEventListener('click', closeMenu);
+    $('scrim').addEventListener('click', closeMenu);
+    drawer.addEventListener('click', e => { if (e.target.closest('.navlink')) closeMenu(); });
+    document.addEventListener('keydown', e => {
+      if (!menuIsOpen()) return;
+      if (e.key === 'Escape') { closeMenu(); return; }
+      if (e.key === 'Tab') {                        // keep keyboard focus inside the open menu
+        const items = [...drawer.querySelectorAll('button, a[href]')].filter(el => !el.hidden);
+        const first = items[0], last = items[items.length - 1];
+        if (e.shiftKey && document.activeElement === first) { e.preventDefault(); last.focus(); }
+        else if (!e.shiftKey && document.activeElement === last) { e.preventDefault(); first.focus(); }
+      }
+    });
+
+    /* ---------- showing things ---------- */
+    function setLoading(on) { document.body.classList.toggle('loading', !!on); }
+
+    function setActive(id) {
+      document.querySelectorAll('.navlink').forEach(a => {
+        if (a.dataset.id === id) a.setAttribute('aria-current', 'page'); else a.removeAttribute('aria-current');
+      });
+    }
+
+    function showHome() {
+      openToken++;
+      current = null;
+      home.hidden = false; status.hidden = true;
+      Object.values(frameById).forEach(f => f.hidden = true);
+      setLoading(false); setActive('home');
+      pageTitle.textContent = 'ABBS Portal'; document.title = 'ABBS Portal';
+      reloadBtn.hidden = true; newTabBtn.hidden = true;
+    }
+
+    function showNotFound(mod) {
+      status.innerHTML = `
+        <div class="status-card">
+          <h2>We could not open ${esc(mod.name)}</h2>
+          <p>The file <code>${esc(mod.path)}</code> was not found. Check that it is uploaded to the same folder as
+             <code>index.html</code>, or correct its name in the <code>MODULES</code> list at the top of the script in <code>index.html</code>.</p>
+          <div class="btns">
+            <button class="btn primary" type="button" id="retry-btn">Try again</button>
+            <button class="btn" type="button" id="home-btn">Back to home</button>
+          </div>
+        </div>`;
+      status.hidden = false;
+      $('retry-btn').onclick = () => openModule(mod);
+      $('home-btn').onclick = () => { location.hash = '#home'; };
+    }
+
+    // Some hosts refuse HEAD or block the check; only a clear "not found" counts as missing.
+    async function fileExists(path) {
+      try {
+        const r = await fetch(path, { method: 'HEAD', cache: 'no-store' });
+        return r.status !== 404 && r.status !== 410;
+      } catch (e) { return true; }
+    }
+
+    function createFrame(mod) {
+      const f = document.createElement('iframe');
+      f.className = 'pane';
+      f.title = mod.name;
+      f.dataset.id = mod.id;
+      f.allow = 'clipboard-write; fullscreen';
+      f.addEventListener('load', () => { if (current && current.id === mod.id) setLoading(false); });
+      f.src = mod.path;
+      frames.appendChild(f);
+      frameById[mod.id] = f;
+      return f;
+    }
+
+    // Apps stay loaded once opened, so switching back is instant and nothing typed is lost.
+    async function openModule(mod) {
+      const token = ++openToken;
+      current = mod;
+      home.hidden = true; status.hidden = true;
+      Object.values(frameById).forEach(f => f.hidden = f.dataset.id !== mod.id);
+      setActive(mod.id);
+      pageTitle.textContent = mod.name; document.title = mod.name + '   ABBS Portal';
+      reloadBtn.hidden = false; newTabBtn.hidden = false; newTabBtn.href = mod.path;
+
+      if (frameById[mod.id]) { setLoading(false); return; }
+
+      setLoading(true);
+      const ok = await fileExists(mod.path);
+      if (token !== openToken) return;                 // the person already moved on
+      if (!ok) { setLoading(false); showNotFound(mod); return; }
+      createFrame(mod);
+    }
+
+    reloadBtn.addEventListener('click', () => {
+      const f = current && frameById[current.id];
+      if (!f) return;
+      setLoading(true);
+      try { f.contentWindow.location.reload(); } catch (e) { f.src = f.src; }
+    });
+
+    /* ---------- address (#finance) decides what is shown, so Back and links just work ---------- */
+    function route() {
+      const id = decodeURIComponent(location.hash.replace(/^#\/?/, ''));
+      const mod = MODULES.find(m => m.id === id);
+      if (mod) openModule(mod); else showHome();
+    }
+    window.addEventListener('hashchange', route);
+    route();
+  </script>
+</body>
+</html>
