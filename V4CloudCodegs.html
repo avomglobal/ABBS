@@ -1,0 +1,1008 @@
+/**
+ * Adullam Bible School portal: backend (Google Apps Script). The page lives on GitHub; Google Sheets is the database.
+ *
+ * SET UP
+ * 1. Create a NEW Google Sheet. Extensions > Apps Script. Paste this file as Code.gs.
+ * 2. Edit CFG below. In Project Settings, set the time zone to your own (for example Africa/Lagos).
+ * 3. Run setup() once and approve the permissions. Run testEmail() once to approve email sending.
+ * 3b. Quizzes: in each Google Form add a short-answer question titled  Student ID , turn on Quiz mode, and paste the form's
+ *     EDITOR link (the one ending in /edit) on the Post tab. Run installNightlyImport() once for a nightly import.
+ * 4. For online payments: Project Settings > Script properties > add PAYSTACK_SECRET (your sk_ key).
+ * 5. Deploy > New deployment > Web app. Execute as: Me. Who has access: Anyone.
+ * 6. Copy the /exec link into apiUrl at the top of index.html. Put your GitHub page address in PORTAL_URL.
+ * 7. Sign up on the page yourself, then type  admin  in the Role column of your row in the Students sheet.
+ */
+
+const CFG = {
+  SCHOOL_NAME: 'Adullam Bible School',
+  ID_PREFIX: 'ABS',                        // student IDs look like ABS-2026-0001
+  PORTAL_URL: '',                          // your GitHub Pages address, used for the link in emails
+  SUPPORT_EMAIL: '',                       // students can reply here (optional)
+  STAFF_EMAIL: '',                         // gets a heads-up for new applications, messages and payments (optional)
+  EMAIL_ENABLED: true,
+  FEE_NGN: 15000,                          // graduation pack fee in naira
+  PAYSTACK_PUBLIC_KEY: '',                 // pk_live_... (the secret key goes in Script properties, never here)
+  PASS_MARK: 60,                           // overall average (all quizzes, all courses) needed to pass
+  MIN_LESSONS: 10,                         // every course has at least this many lessons
+  UNLOCK_MIN_PERCENT: 0,                   // practice quiz score needed to unlock the next part (0 = just finish it)
+  ATTEMPT_RULE: 'best',                    // which attempt counts when a student retakes a quiz: 'best', 'latest' or 'first'
+  STRICT_EMAIL_MATCH: false,               // true = the Google account on a form answer must match the student's registered email
+  IMPORT_RECENT_DAYS: 21,                  // the nightly import checks lessons released in the last this many days
+  SESSION_SECONDS: 21600,                  // stay signed in up to 6 hours
+  MAX_FAILS: 5, LOCK_SECONDS: 900,         // wrong passwords before a 15 minute lock
+  HASH_ROUNDS: 200,
+  REQUIRE_EMAIL_VERIFICATION: true,        // new accounts must enter an emailed 6-digit code
+  VERIFY_SECONDS: 21600,                   // sign-up code works for 6 hours (the most the cache allows)
+  RESET_SECONDS: 1800,                     // password reset code works for 30 minutes
+  MAX_CODE_TRIES: 5,                       // wrong guesses before a code is thrown away
+  MAX_SIGNUP_EMAILS_PER_DAY: 60,           // sign-up emails go to unproven addresses, so cap them
+  MAX_RESET_EMAILS_PER_DAY: 40,
+  REPLACE_UNVERIFIED_MINUTES: 10,          // a waiting, unverified sign-up cannot be replaced for this long
+  SUBJECTS: ['Lost Student ID', 'Cannot watch video', 'Quiz problem', 'Payment', 'General']
+};
+
+const SHEETS = {
+  Students: ['UID', 'Email', 'PasswordHash', 'Salt', 'Name', 'Phone', 'Church', 'Testimony', 'Status', 'StudentID', 'Role',
+             'Verified', 'CreatedAt', 'ApprovedAt', 'LastLogin', 'KinName', 'KinRel', 'KinPhone', 'Certificate'],
+  Courses:  ['Code', 'Title', 'Planned', 'Order'],                                          // Planned = number of lessons (10 or more)
+  Lessons:  ['Course', 'Lesson', 'Title', 'Date', 'Handout', 'Deadline', 'FinalQuiz', 'FinalForm'],  // dates as YYYY-MM-DD
+  Parts:    ['Course', 'Lesson', 'Part', 'Video', 'Audio', 'Quiz', 'Form'],       // 3 parts a lesson; Quiz = student link, Form = editor link
+  Progress: ['StudentID', 'Course', 'Lesson', 'Item', 'Score', 'Date'],           // Item: P1, P2, P3 (practice) or FINAL
+  Scores:   ['StudentID', 'Course', 'Lesson', 'Score', 'Date', 'Source'],         // graded quiz scores; Source: form or manual
+  Notices:  ['Date', 'Title', 'Body'],
+  Feedback: ['FID', 'Date', 'UID', 'Subject', 'Message', 'Reply', 'ReplyDate'],
+  Payments: ['Ref', 'Date', 'UID', 'Amount', 'Method', 'Status'],                       // Status: Started or Paid
+  AdminLog: ['Timestamp', 'AdminUID', 'Action', 'Target', 'Detail']
+};
+
+function setup() {
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  PropertiesService.getScriptProperties().setProperty('SHEET_ID', ss.getId());
+  Object.keys(SHEETS).forEach(function (name) {
+    const sh = ss.getSheetByName(name) || ss.insertSheet(name);
+    const h = SHEETS[name];
+    sh.getRange(1, 1, sh.getMaxRows(), h.length).setNumberFormat('@'); // plain text: nothing typed is read as a formula
+    sh.getRange(1, 1, 1, h.length).setValues([h]).setFontWeight('bold');
+    sh.setFrozenRows(1);
+  });
+  const blank = ss.getSheetByName('Sheet1');
+  if (blank && ss.getSheets().length > 1 && blank.getLastRow() === 0) ss.deleteSheet(blank);
+  Logger.log('Setup done. Now deploy as a web app.');
+}
+
+/* ------------------------------------------------------------- web app */
+
+function doGet() { return ContentService.createTextOutput('School portal API is running.'); }
+
+// level: pub = no sign-in, any = token only, user = signed in, student = approved student, admin = staff
+const ACTIONS = {
+  register: ['pub', register_], verifyEmail: ['pub', verifyEmail_], resendCode: ['pub', resendCode_],
+  login: ['pub', login_], requestReset: ['pub', requestReset_], resetPassword: ['pub', resetPassword_],
+  logout: ['any', logout_],
+  home: ['user', home_], mine: ['user', mine_], send: ['user', send_], saveProfile: ['user', saveProfile_], changePassword: ['user', changePassword_],
+  lessons: ['student', lessons_], checkPart: ['student', checkPart_], scores: ['student', scores_], payInit: ['student', payInit_], payVerify: ['student', payVerify_],
+  admin: ['admin', admin_], approve: ['admin', approve_], deny: ['admin', deny_], resendId: ['admin', resendId_],
+  certificate: ['admin', certificate_], saveScores: ['admin', saveScores_], saveCourse: ['admin', saveCourse_], saveLesson: ['admin', saveLesson_],
+  lessonInfo: ['admin', lessonInfo_], importScores: ['admin', importScores_],
+  notice: ['admin', notice_], reply: ['admin', reply_], recordPayment: ['admin', recordPayment_]
+};
+
+/** The page POSTs { a: action, t: token, p: {...} } as plain text. Reply: { ok, data } or { ok:false, error, code }. */
+function doPost(e) {
+  const out = run_(function () {
+    const raw = (e && e.postData && e.postData.contents) || '';
+    if (raw.length > 200000) throw userErr_('That request is too large.');
+    let body;
+    try { body = JSON.parse(raw); } catch (x) { throw userErr_('Bad request.'); }
+    const act = Object.prototype.hasOwnProperty.call(ACTIONS, String(body.a)) ? ACTIONS[body.a] : null;
+    if (!act) throw userErr_('Unknown request.');
+    const level = act[0], fn = act[1];
+    const p = body.p && typeof body.p === 'object' ? body.p : {};
+    if (level === 'pub') return fn(p);
+    if (level === 'any') return fn(body.t);
+    const uid = session_(body.t);
+    const st = findRow_('Students', 'UID', uid);
+    if (!st) throw userErr_('Your account was not found. Sign in again.', 'SESSION');
+    if (level === 'student' && st.Status !== 'Approved') throw userErr_('Your application has not been approved yet.');
+    if (level === 'admin' && !isAdmin_(st)) throw userErr_('This page is for staff.');
+    return fn(st, p);
+  });
+  return ContentService.createTextOutput(JSON.stringify(out)).setMimeType(ContentService.MimeType.JSON);
+}
+
+/* ------------------------------------------------ sign-up, sign-in, codes */
+
+function register_(p) {
+  const name = str_(p.name, 100), email = str_(p.email, 120).toLowerCase(), phone = str_(p.phone, 25);
+  const church = str_(p.church, 100), testimony = str_(p.testimony, 1500), pw = String(p.password || '');
+  if (name.length < 2) throw userErr_('Enter your full name.');
+  if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email)) throw userErr_('Enter a valid email address.');
+  if (!/^[0-9+()\s-]{7,25}$/.test(phone)) throw userErr_('Enter your WhatsApp number.');
+  if (church.length < 2) throw userErr_('Enter your church or ministry.');
+  if (testimony.length < 20) throw userErr_('Write a short testimony of your call (at least 20 characters).');
+  if (pw.length < 8 || pw.length > 128) throw userErr_('Password must be 8 to 128 characters.');
+  if (p.covenant !== true) throw userErr_('Please accept the covenant to continue.');
+  const verify = CFG.REQUIRE_EMAIL_VERIFICATION;
+  if (verify && !CFG.EMAIL_ENABLED) throw userErr_('Sign-up needs email, which is switched off. Contact the school.');
+
+  const salt = Utilities.getUuid(), hash = hash_(pw, salt);
+  const uid = lock_(function () {
+    const old = findRow_('Students', 'Email', email);
+    if (old) {
+      if (isVerified_(old)) throw userErr_('An account with that email already exists. Sign in instead.');
+      // An unverified sign-up holds no data, so an old one can be replaced, but not a fresh one:
+      // that stops someone overwriting a sign-up another person is in the middle of.
+      if (Date.now() - Date.parse(old.CreatedAt) < CFG.REPLACE_UNVERIFIED_MINUTES * 60000) {
+        throw userErr_('A sign-up with that email is waiting for its code. Check your email, or try again in a few minutes.');
+      }
+      CacheService.getScriptCache().remove('c_v_' + old.UID);
+      sheet_('Students').deleteRow(old._row);
+    }
+    const id = nextId_('U', 'UID_COUNTER', 6);
+    append_('Students', { UID: id, Email: email, PasswordHash: hash, Salt: salt, Name: name, Phone: phone, Church: church,
+                          Testimony: testimony, Status: 'Pending', Role: '', Verified: verify ? 'no' : 'yes', CreatedAt: now_() });
+    return id;
+  });
+  if (!verify) { newApplication_(name, email); return { created: true }; }
+  const emailed = signupBudget_() ? sendCode_('v', uid, email, name) : false;
+  return { verify: true, emailed: !!emailed };
+}
+
+function sendCode_(purpose, uid, email, name) {
+  const secs = purpose === 'v' ? CFG.VERIFY_SECONDS : CFG.RESET_SECONDS;
+  const code = issueCode_(purpose, uid, secs);
+  const mins = Math.round(secs / 60);
+  const life = mins >= 120 ? Math.round(mins / 60) + ' hours' : mins + ' minutes';
+  return purpose === 'v'
+    ? mail_(email, 'Verify your email', ['Hello ' + clean1_(name) + ',', '', 'Your verification code is ' + code + '.',
+        'It works for ' + life + '. Enter it on the sign-up page to finish your application.',
+        'If you did not apply, ignore this email and nothing will happen.'])
+    : mail_(email, 'Password reset code', ['Hello ' + clean1_(name) + ',', '', 'Your password reset code is ' + code + '.',
+        'It works for ' + life + ' and can be used once.',
+        'If you did not ask for this, ignore this email. Your password has not changed.']);
+}
+
+function newApplication_(name, email) {
+  mail_(email, 'Application received', ['Hello ' + clean1_(name) + ',', '',
+    'We have your application. We will email you when it has been reviewed.']);
+  staffMail_('New application', [clean1_(name) + ' has applied. Review it on the Review tab.']);
+}
+
+function verifyEmail_(p) {
+  const bad = 'That code is invalid or has expired. Ask for a new one.';
+  const st = byEmail_(p.email);
+  if (!st || isVerified_(st)) throw userErr_(bad);
+  consumeCode_('v', st.UID, p.code, bad);
+  lock_(function () { setCells_('Students', st._row, { Verified: 'yes' }); });
+  newApplication_(st.Name, st.Email);
+  return { verified: true };
+}
+
+function resendCode_(p) {
+  const key = str_(p.email, 120).toLowerCase();
+  throttle_('vq_', key, 3, 3600, 'Too many requests. Try again in an hour.');
+  const st = byEmail_(key);
+  if (!st || isVerified_(st)) return { sent: true }; // same reply whether or not the account exists
+  if (!signupBudget_()) throw userErr_('Verification emails are busy right now. Try again later or contact the school.');
+  sendCode_('v', st.UID, st.Email, st.Name);
+  return { sent: true };
+}
+
+function login_(p) {
+  const email = str_(p.email, 120).toLowerCase(), pw = String(p.password || '');
+  const cache = CacheService.getScriptCache(), failKey = 'f_' + email;
+  const fails = Number(cache.get(failKey) || 0);
+  if (fails >= CFG.MAX_FAILS) throw userErr_('Too many failed attempts. Try again in 15 minutes.');
+  const st = email ? byEmail_(email) : null;
+  if (!st || !safeEq_(hash_(pw, st.Salt), st.PasswordHash)) {
+    cache.put(failKey, String(fails + 1), CFG.LOCK_SECONDS);
+    throw userErr_('Email or password is incorrect.');
+  }
+  cache.remove(failKey);
+  if (!isVerified_(st)) throw userErr_('Verify your email first. Enter the code we emailed you.', 'VERIFY');
+  setCells_('Students', st._row, { LastLogin: now_() });
+  return { token: newSession_(st.UID) };
+}
+
+function logout_(token) {
+  if (typeof token === 'string') CacheService.getScriptCache().remove('s_' + token);
+  return {};
+}
+
+function requestReset_(p) {
+  const key = str_(p.email, 120).toLowerCase();
+  if (!key) throw userErr_('Enter your email.');
+  if (!CFG.EMAIL_ENABLED) throw userErr_("Password reset by email isn't set up. Contact the school.");
+  throttle_('rq_', key, 3, 3600, 'Too many reset requests. Try again in an hour.');
+  const st = byEmail_(key);
+  if (!st) return { sent: true };
+  if (!budget_('RESET_', CFG.MAX_RESET_EMAILS_PER_DAY)) throw userErr_('Password reset is busy right now. Try again later or contact the school.');
+  sendCode_('r', st.UID, st.Email, st.Name);
+  return { sent: true };
+}
+
+function resetPassword_(p) {
+  const pw = String(p.password || '');
+  if (pw.length < 8 || pw.length > 128) throw userErr_('New password must be 8 to 128 characters.');
+  const bad = 'That code is invalid or has expired. Request a new one.';
+  const st = byEmail_(p.email);
+  if (!st) throw userErr_(bad);
+  consumeCode_('r', st.UID, p.code, bad);
+  setPassword_(st, pw, true);
+  CacheService.getScriptCache().remove('f_' + String(st.Email).toLowerCase()); // clear any sign-in lockout
+  mail_(st.Email, 'Password changed', ['Hello ' + clean1_(st.Name) + ',', '', 'Your password was reset using an emailed code.' + contact_()]);
+  return {};
+}
+
+function changePassword_(st, p) {
+  const pw = String(p.new || '');
+  if (pw.length < 8 || pw.length > 128) throw userErr_('New password must be 8 to 128 characters.');
+  if (!safeEq_(hash_(String(p.old || ''), st.Salt), st.PasswordHash)) throw userErr_('Your current password is incorrect.');
+  setPassword_(st, pw, false);
+  mail_(st.Email, 'Password changed', ['Hello ' + clean1_(st.Name) + ',', '', 'Your password was just changed.' + contact_()]);
+  return { token: newSession_(st.UID) }; // this device stays signed in; every other sign-in stops working
+}
+
+function setPassword_(st, pw, markVerified) {
+  const salt = Utilities.getUuid(), h = hash_(pw, salt);
+  lock_(function () {
+    const c = { Salt: salt, PasswordHash: h };
+    if (markVerified && !isVerified_(st)) c.Verified = 'yes'; // the code reached their inbox
+    setCells_('Students', st._row, c);
+    PropertiesService.getScriptProperties().setProperty('PWV_' + st.UID, String(Date.now()));
+  });
+}
+
+function contact_() {
+  return CFG.SUPPORT_EMAIL ? ' If this was not you, contact ' + CFG.SUPPORT_EMAIL + ' right away.' : ' If this was not you, contact the school right away.';
+}
+
+/* --------------------------------------------------------------- students */
+
+function courseList_() {
+  return rows_('Courses').filter(function (c) { return c.Code; })
+    .sort(function (a, b) { return Number(a.Order) - Number(b.Order); });
+}
+
+/** Overall average = the mean of every quiz score the student has (each quiz counts equally), plus one average per course. */
+function stats_(sid) {
+  const out = { avg: null, quizzes: 0, courses: [] };
+  if (!sid) return out;
+  const mine = rows_('Scores').filter(function (r) { return r.StudentID === sid; });
+  if (!mine.length) return out;
+  const mean = function (a) { return Math.round(a.reduce(function (x, y) { return x + Number(y.Score); }, 0) / a.length); };
+  out.avg = mean(mine);
+  out.quizzes = mine.length;
+  courseList_().forEach(function (c) {
+    const m = mine.filter(function (r) { return r.Course === c.Code; });
+    if (m.length) out.courses.push({ code: c.Code, title: c.Title, avg: mean(m), count: m.length });
+  });
+  return out;
+}
+
+function isPaid_(uid) {
+  return rows_('Payments').some(function (r) { return r.UID === uid && r.Status === 'Paid'; });
+}
+
+function home_(st) {
+  const s = stats_(st.StudentID), ok = st.Status === 'Approved' || isAdmin_(st);
+  const pays = rows_('Payments').filter(function (r) { return r.UID === st.UID; });
+  const started = pays.filter(function (r) { return r.Status === 'Started'; }).pop();
+  const notices = ok ? rows_('Notices').reverse().slice(0, 20).map(function (n) { return { date: n.Date, title: n.Title, body: n.Body }; }) : [];
+  return {
+    name: st.Name, email: st.Email, id: st.StudentID, status: st.Status, role: isAdmin_(st) ? 'Admin' : 'Student',
+    avg: s.avg, quizzes: s.quizzes, courses: s.courses, passMark: CFG.PASS_MARK, fee: CFG.FEE_NGN,
+    paid: pays.some(function (r) { return r.Status === 'Paid'; }), payRef: started ? started.Ref : '', certificate: st.Certificate,
+    phone: st.Phone, church: st.Church, kinName: st.KinName, kinRel: st.KinRel, kinPhone: st.KinPhone, notices: notices
+  };
+}
+
+/** Released lessons grouped by course. Each lesson has parts (video + practice quiz) and a graded quiz.
+ *  A part opens when the previous part's quiz is done. Links for locked items are never sent to the page. */
+function lessons_(st) {
+  const today = today_();
+  const lessons = rows_('Lessons').filter(function (l) { return l.Course && l.Date && l.Date <= today; });
+  const parts = rows_('Parts');
+  const prog = progressMap_(st.StudentID);
+  const mine = rows_('Scores').filter(function (r) { return r.StudentID === st.StudentID; });
+  return {
+    courses: courseList_().map(function (c) {
+      const ls = lessons.filter(function (l) { return l.Course === c.Code; })
+        .sort(function (a, b) { return Number(b.Lesson) - Number(a.Lesson); });
+      return { code: c.Code, title: c.Title, planned: Number(c.Planned) || CFG.MIN_LESSONS, released: ls.length,
+               lessons: ls.map(function (l) { return lessonCard_(l, parts, prog, mine); }) };
+    }).filter(function (c) { return c.released > 0; })
+  };
+}
+
+/* ---------------------------------------------------- quiz parts and Google Forms */
+
+function formId_(link) { // the id inside an EDITOR link: docs.google.com/forms/d/<id>/edit (not the /d/e/ link students use)
+  const m = /\/forms\/d\/(?!e\/)([\w-]+)/.exec(String(link || ''));
+  return m ? m[1] : '';
+}
+
+function progressMap_(sid) {
+  const m = {};
+  rows_('Progress').forEach(function (r) { if (r.StudentID === sid) m[r.Course + '|' + Number(r.Lesson) + '|' + r.Item] = r; });
+  return m;
+}
+
+function done_(rec) {
+  if (!rec) return false;
+  return !(CFG.UNLOCK_MIN_PERCENT > 0 && rec.Score !== '' && Number(rec.Score) < CFG.UNLOCK_MIN_PERCENT);
+}
+
+function lessonCard_(l, parts, prog, scoreRows) {
+  const n = Number(l.Lesson), today = today_();
+  let prevDone = true;
+  const cards = parts.filter(function (p) { return p.Course === l.Course && Number(p.Lesson) === n && (p.Video || p.Audio || p.Quiz); })
+    .sort(function (a, b) { return Number(a.Part) - Number(b.Part); })
+    .map(function (p) {
+      const rec = prog[l.Course + '|' + n + '|P' + Number(p.Part)];
+      const isDone = done_(rec), open = prevDone, quiz = url_(p.Quiz);
+      const out = { part: Number(p.Part), state: isDone ? 'done' : open ? 'open' : 'locked',
+                    score: rec && rec.Score !== '' ? Number(rec.Score) : null, hasQuiz: !!quiz,
+                    video: open ? url_(p.Video) : '', audio: open ? url_(p.Audio) : '', quiz: open ? quiz : '' };
+      prevDone = prevDone && (isDone || !quiz); // a part with no quiz never blocks the next one
+      return out;
+    });
+  const fq = url_(l.FinalQuiz);
+  const sc = scoreRows.filter(function (r) { return r.Course === l.Course && Number(r.Lesson) === n; })[0];
+  let final = null;
+  if (fq || sc) {
+    const closed = !sc && l.Deadline && l.Deadline < today;
+    final = { state: sc ? 'done' : closed ? 'closed' : prevDone ? 'open' : 'locked', score: sc ? Number(sc.Score) : null,
+              quiz: (!sc && !closed && prevDone) ? fq : '', deadline: l.Deadline, hasForm: !!formId_(l.FinalForm) };
+  }
+  return { lesson: l.Lesson, title: l.Title, date: l.Date, deadline: l.Deadline, handout: url_(l.Handout), parts: cards, final: final };
+}
+
+function lessonFind_(course, lesson) {
+  return rows_('Lessons').filter(function (l) { return l.Course === course && Number(l.Lesson) === Number(lesson); })[0] || null;
+}
+
+function sourcesFor_(l, parts) { // every quiz of a lesson that has a form we can read
+  const n = Number(l.Lesson), out = [];
+  parts.filter(function (p) { return p.Course === l.Course && Number(p.Lesson) === n && formId_(p.Form); })
+    .sort(function (a, b) { return Number(a.Part) - Number(b.Part); })
+    .forEach(function (p) { out.push({ course: l.Course, lesson: n, item: 'P' + Number(p.Part), form: p.Form }); });
+  if (formId_(l.FinalForm)) out.push({ course: l.Course, lesson: n, item: 'FINAL', form: l.FinalForm, deadline: l.Deadline });
+  return out;
+}
+
+function itemLabel_(item) { return item === 'FINAL' ? 'Graded quiz' : 'Part ' + item.slice(1); }
+
+function maxPoints_(form) {
+  const fns = { MULTIPLE_CHOICE: 'asMultipleChoiceItem', CHECKBOX: 'asCheckboxItem', LIST: 'asListItem', TEXT: 'asTextItem',
+                PARAGRAPH_TEXT: 'asParagraphTextItem', SCALE: 'asScaleItem', DATE: 'asDateItem', TIME: 'asTimeItem',
+                DATETIME: 'asDateTimeItem', DURATION: 'asDurationItem', GRID: 'asGridItem', CHECKBOX_GRID: 'asCheckboxGridItem' };
+  let total = 0;
+  form.getItems().forEach(function (item) {
+    const fn = fns[String(item.getType())];
+    if (!fn) return;
+    try { total += Number(item[fn]().getPoints()) || 0; } catch (e) { /* not a scored item */ }
+  });
+  return total;
+}
+
+function better_(v, cur) {
+  if (CFG.ATTEMPT_RULE === 'latest') return v.ts > cur.ts;
+  if (CFG.ATTEMPT_RULE === 'first') return v.ts < cur.ts;
+  return (v.pct || 0) > (cur.pct || 0);
+}
+
+function upsertMany_(name, entries, keyFn, fields) {
+  const idx = {};
+  rows_(name).forEach(function (r) { idx[keyFn(r)] = r; });
+  const adds = [];
+  entries.forEach(function (e) {
+    const hit = idx[keyFn(e)];
+    if (!hit) { adds.push(toArray_(name, e)); return; }
+    const changed = {};
+    fields.forEach(function (f) { if (String(hit[f]) !== String(e[f])) changed[f] = e[f]; });
+    if (Object.keys(changed).length) setCells_(name, hit._row, changed);
+  });
+  if (adds.length) { const sh = sheet_(name); sh.getRange(sh.getLastRow() + 1, 1, adds.length, SHEETS[name].length).setValues(adds); }
+}
+
+/** Reads one Google Form's answers and records them. A student is found by the Student ID they typed, else by the
+ *  Google account email. Pass onlyId to record just one student. Returns { matched, late, unmatched, manual }. */
+function importSource_(src, onlyId) {
+  const id = formId_(src.form);
+  if (!id) throw userErr_('That quiz has no valid form link.');
+  let form;
+  try { form = FormApp.openById(id); }
+  catch (e) { throw userErr_('The script cannot open that form. Use the editor link, and make sure you own the form.'); }
+  const tz = Session.getScriptTimeZone(), final = src.item === 'FINAL', max = maxPoints_(form);
+  const sidItem = form.getItems().filter(function (i) { return /student\s*id/i.test(i.getTitle()); })[0];
+  const byId = {}, byEmail = {};
+  rows_('Students').forEach(function (s) {
+    if (s.Status === 'Approved' && s.StudentID) { byId[s.StudentID.toLowerCase()] = s; byEmail[String(s.Email).toLowerCase()] = s; }
+  });
+  const best = {}, stat = { matched: 0, late: 0, unmatched: 0, manual: 0 };
+  form.getResponses().forEach(function (r) {
+    const em = String(r.getRespondentEmail() || '').toLowerCase();
+    let st = null;
+    if (sidItem) { const ir = r.getResponseForItem(sidItem), v = ir ? String(ir.getResponse()).trim().toLowerCase() : ''; if (v) st = byId[v] || null; }
+    if (!st && em) st = byEmail[em] || null;
+    if (st && CFG.STRICT_EMAIL_MATCH && em && String(st.Email).toLowerCase() !== em) st = null;
+    if (!st) { stat.unmatched++; return; }
+    if (onlyId && st.StudentID !== onlyId) return;
+    const ts = r.getTimestamp();
+    if (final && src.deadline && Utilities.formatDate(ts, tz, 'yyyy-MM-dd') > src.deadline) { stat.late++; return; }
+    let pts = 0;
+    r.getGradableItemResponses().forEach(function (g) { pts += Number(g.getScore()) || 0; });
+    const v = { pct: max > 0 ? Math.min(100, Math.round(pts / max * 100)) : null, ts: ts.getTime() };
+    if (!best[st.StudentID] || better_(v, best[st.StudentID])) best[st.StudentID] = v;
+  });
+  const ids = Object.keys(best);
+  stat.matched = ids.length;
+  if (!ids.length) return stat;
+  const key = function (r) { return r.StudentID + '|' + r.Course + '|' + Number(r.Lesson) + (r.Item ? '|' + r.Item : ''); };
+  lock_(function () {
+    upsertMany_('Progress', ids.map(function (sid) {
+      return { StudentID: sid, Course: src.course, Lesson: String(src.lesson), Item: src.item, Score: best[sid].pct == null ? '' : String(best[sid].pct), Date: today_() };
+    }), key, ['Score', 'Date']);
+    if (final) {
+      const manual = {};
+      rows_('Scores').forEach(function (r) { if (r.Source === 'manual') manual[key(r)] = true; });
+      const entries = ids.filter(function (sid) { return best[sid].pct != null; }).map(function (sid) {
+        return { StudentID: sid, Course: src.course, Lesson: String(src.lesson), Score: String(best[sid].pct), Date: today_(), Source: 'form' };
+      });
+      const fresh = entries.filter(function (e) { return !manual[key(e)]; });
+      stat.manual = entries.length - fresh.length;
+      upsertMany_('Scores', fresh, key, ['Score', 'Date', 'Source']);
+    }
+  });
+  return stat;
+}
+
+/** A student taps "I finished, check it". Reads that quiz's form for their answers, then unlocks what comes next. */
+function checkPart_(st, p) {
+  const course = str_(p.course, 10).toUpperCase(), lesson = Math.floor(Number(p.lesson)), item = str_(p.item, 6).toUpperCase();
+  if (['P1', 'P2', 'P3', 'FINAL'].indexOf(item) < 0) throw userErr_('Unknown quiz.');
+  throttle_('cp_', st.UID, 30, 3600, 'Too many checks. Try again in a while.');
+  const l = lessonFind_(course, lesson);
+  if (!l || l.Date > today_()) throw userErr_('That lesson is not available yet.');
+  const parts = rows_('Parts');
+  const card = lessonCard_(l, parts, progressMap_(st.StudentID), rows_('Scores').filter(function (r) { return r.StudentID === st.StudentID; }));
+  const state = item === 'FINAL' ? (card.final && card.final.state)
+    : (card.parts.filter(function (x) { return 'P' + x.part === item; })[0] || {}).state;
+  if (state === 'locked' || state === 'closed' || !state) throw userErr_(state === 'closed' ? 'That quiz has closed.' : 'Finish the earlier quiz first.');
+  const src = sourcesFor_(l, parts).filter(function (x) { return x.item === item; })[0];
+  if (!src) throw userErr_('This quiz is not connected to automatic checking. Please tell the office.');
+  const r = importSource_(src, st.StudentID);
+  if (!r.matched) throw userErr_(r.late ? 'Your answer arrived after the deadline, so it was not counted.' : 'We could not find your answers yet. Make sure you typed your Student ID, then try again in a minute.');
+  return { item: item };
+}
+
+/** Staff: import every quiz of one lesson. */
+function importScores_(st, p) {
+  const l = lessonFind_(str_(p.course, 10).toUpperCase(), Math.floor(Number(p.lesson)));
+  if (!l) throw userErr_('Publish that lesson first.');
+  const srcs = sourcesFor_(l, rows_('Parts'));
+  if (!srcs.length) throw userErr_('No quiz forms are connected to that lesson. Add the form editor links on the Post tab.');
+  const lines = srcs.map(function (s) {
+    try {
+      const r = importSource_(s);
+      return itemLabel_(s.item) + ': ' + r.matched + ' student' + (r.matched === 1 ? '' : 's') + ' recorded' +
+        (r.late ? ', ' + r.late + ' late' : '') + (r.unmatched ? ', ' + r.unmatched + ' not matched to a student' : '') +
+        (r.manual ? ', ' + r.manual + ' kept as typed by hand' : '');
+    } catch (e) { return itemLabel_(s.item) + ': ' + (e.user ? e.message : 'could not be read'); }
+  });
+  logAction_(st, 'Import quizzes', l.Course + ' lesson ' + l.Lesson, lines.length + ' forms');
+  return { lines: lines };
+}
+
+/** Time trigger: imports quizzes for lessons released recently. Set it up once with installNightlyImport(). */
+function importRecent() {
+  const tz = Session.getScriptTimeZone(), today = today_();
+  const cutoff = Utilities.formatDate(new Date(Date.now() - CFG.IMPORT_RECENT_DAYS * 864e5), tz, 'yyyy-MM-dd');
+  const parts = rows_('Parts');
+  rows_('Lessons').filter(function (l) { return l.Date && l.Date <= today && l.Date >= cutoff; }).forEach(function (l) {
+    sourcesFor_(l, parts).forEach(function (s) {
+      try { importSource_(s); } catch (e) { console.error('Import failed for ' + s.course + ' ' + s.lesson + ' ' + s.item + ': ' + (e && e.message)); }
+    });
+  });
+}
+
+/** Run once from the editor: creates a trigger that runs importRecent() every night at about 2 AM. */
+function installNightlyImport() {
+  ScriptApp.getProjectTriggers().forEach(function (t) { if (t.getHandlerFunction() === 'importRecent') ScriptApp.deleteTrigger(t); });
+  ScriptApp.newTrigger('importRecent').timeBased().everyDays(1).atHour(2).create();
+  Logger.log('Nightly import is set up.');
+}
+
+/** Staff: load one lesson's saved details (including the form editor links) so it can be edited. */
+function lessonInfo_(st, p) {
+  const l = lessonFind_(str_(p.course, 10).toUpperCase(), Math.floor(Number(p.lesson)));
+  if (!l) return null;
+  const saved = rows_('Parts').filter(function (r) { return r.Course === l.Course && Number(r.Lesson) === Number(l.Lesson); });
+  return {
+    title: l.Title, date: l.Date, handout: l.Handout, deadline: l.Deadline, finalQuiz: l.FinalQuiz, finalForm: l.FinalForm,
+    parts: [1, 2, 3].map(function (n) {
+      const r = saved.filter(function (x) { return Number(x.Part) === n; })[0] || {};
+      return { video: r.Video || '', audio: r.Audio || '', quiz: r.Quiz || '', form: r.Form || '' };
+    })
+  };
+}
+
+function scores_(st) {
+  const s = stats_(st.StudentID);
+  const mine = rows_('Scores').filter(function (r) { return r.StudentID === st.StudentID; });
+  return {
+    avg: s.avg, passMark: CFG.PASS_MARK,
+    courses: s.courses.map(function (c) {
+      return {
+        code: c.code, title: c.title, avg: c.avg,
+        scores: mine.filter(function (r) { return r.Course === c.code; })
+          .sort(function (a, b) { return Number(a.Lesson) - Number(b.Lesson); })
+          .map(function (r) { return { lesson: r.Lesson, score: r.Score, date: r.Date }; })
+      };
+    })
+  };
+}
+
+function mine_(st) {
+  return rows_('Feedback').filter(function (r) { return r.UID === st.UID; }).reverse()
+    .map(function (f) { return { subject: f.Subject, message: f.Message, reply: f.Reply, date: f.Date }; });
+}
+
+function send_(st, p) {
+  const subject = str_(p.subject, 60), message = str_(p.message, 1500);
+  if (CFG.SUBJECTS.indexOf(subject) < 0) throw userErr_('Choose a topic.');
+  if (message.length < 3) throw userErr_('Write your message.');
+  throttle_('sm_', st.UID, 10, 21600, 'You have sent many messages recently. Please wait for the office to reply.');
+  lock_(function () {
+    append_('Feedback', { FID: nextId_('F', 'FID_COUNTER', 6), Date: today_(), UID: st.UID, Subject: subject, Message: message });
+  });
+  staffMail_('New student message', [clean1_(st.Name) + ' (' + (st.StudentID || 'not yet approved') + ') wrote about: ' + subject + '. Reply on the Inbox tab.']);
+  return 'Message sent. The office will reply by email.';
+}
+
+function saveProfile_(st, p) {
+  const phone = str_(p.phone, 25), church = str_(p.church, 100);
+  const kinName = str_(p.kinName, 100), kinRel = str_(p.kinRel, 60), kinPhone = str_(p.kinPhone, 25);
+  if (!/^[0-9+()\s-]{7,25}$/.test(phone)) throw userErr_('Enter a valid WhatsApp number.');
+  if (church.length < 2) throw userErr_('Enter your church or ministry.');
+  if (kinPhone && !/^[0-9+()\s-]{7,25}$/.test(kinPhone)) throw userErr_('Enter a valid phone number for your next of kin.');
+  lock_(function () { setCells_('Students', st._row, { Phone: phone, Church: church, KinName: kinName, KinRel: kinRel, KinPhone: kinPhone }); });
+  return 'Profile saved.';
+}
+
+/* ---------------------------------------------------------------- payments */
+
+function paystackSecret_() {
+  return PropertiesService.getScriptProperties().getProperty('PAYSTACK_SECRET') || '';
+}
+
+function payInit_(st) {
+  if (!CFG.PAYSTACK_PUBLIC_KEY || !paystackSecret_()) throw userErr_('Online payment is not set up yet. Please contact the office.');
+  if (isPaid_(st.UID)) throw userErr_('Your fee is already paid. Thank you.');
+  throttle_('pi_', st.UID, 10, 3600, 'Too many payment attempts. Try again in an hour.');
+  const ref = CFG.ID_PREFIX + '-' + Date.now() + '-' + Utilities.getUuid().slice(0, 6);
+  lock_(function () { append_('Payments', { Ref: ref, Date: now_(), UID: st.UID, Amount: CFG.FEE_NGN, Method: 'Paystack', Status: 'Started' }); });
+  return { key: CFG.PAYSTACK_PUBLIC_KEY, email: st.Email, amount: CFG.FEE_NGN, ref: ref };
+}
+
+/** Asks Paystack (with the secret key, from the server) whether the payment really went through. */
+function payVerify_(st, p) {
+  const ref = str_(p.ref, 80);
+  const row = findRow_('Payments', 'Ref', ref);
+  if (!row || row.UID !== st.UID) throw userErr_('Payment not found.');
+  if (row.Status === 'Paid') return { paid: true };
+  const secret = paystackSecret_();
+  if (!secret) throw userErr_('Online payment is not set up yet. Please contact the office.');
+  let r;
+  try {
+    const res = UrlFetchApp.fetch('https://api.paystack.co/transaction/verify/' + encodeURIComponent(ref),
+      { headers: { Authorization: 'Bearer ' + secret }, muteHttpExceptions: true });
+    r = JSON.parse(res.getContentText());
+  } catch (e) { throw userErr_('We could not reach the payment service. Try again in a minute.'); }
+  const d = r && r.data;
+  const good = r && r.status === true && d && d.status === 'success' && d.reference === ref &&
+               Number(d.amount) === Number(row.Amount) * 100 && String(d.currency) === 'NGN';
+  if (!good) throw userErr_('We could not confirm that payment yet. If you were charged, tap Check payment again in a minute, or contact the office.');
+  lock_(function () { setCells_('Payments', row._row, { Status: 'Paid', Date: now_() }); });
+  mail_(st.Email, 'Payment received', ['Hello ' + clean1_(st.Name) + ',', '', 'We received your payment of N' + Number(row.Amount).toLocaleString('en-US') + '. Thank you.']);
+  staffMail_('Payment received', [clean1_(st.Name) + ' (' + st.StudentID + ') paid N' + Number(row.Amount).toLocaleString('en-US') + ' online.']);
+  return { paid: true };
+}
+
+/* --------------------------------------------------------------- staff */
+
+function isAdmin_(st) { return String(st.Role).toLowerCase() === 'admin'; }
+
+function logAction_(st, action, target, detail) {
+  append_('AdminLog', { Timestamp: now_(), AdminUID: st.UID, Action: action, Target: target || '', Detail: str_(detail, 400) });
+}
+
+function target_(uid) {
+  const t = findRow_('Students', 'UID', str_(uid, 40));
+  if (!t) throw userErr_('Student not found.');
+  return t;
+}
+
+function admin_() {
+  const all = rows_('Students').filter(function (r) { return r.UID; });
+  const names = {};
+  all.forEach(function (r) { names[r.UID] = r.Name; });
+  return {
+    fee: CFG.FEE_NGN, passMark: CFG.PASS_MARK,
+    students: all.filter(isVerified_).slice(0, 1500).map(function (r) {
+      return { uid: r.UID, name: r.Name, email: r.Email, phone: r.Phone, church: r.Church, testimony: r.Testimony,
+               status: r.Status, id: r.StudentID, certificate: r.Certificate, admin: isAdmin_(r) };
+    }),
+    courses: courseList_().map(function (c) { return { code: c.Code, title: c.Title, planned: Number(c.Planned) || CFG.MIN_LESSONS }; }),
+    lessons: rows_('Lessons').map(function (l) { return { course: l.Course, lesson: l.Lesson, title: l.Title, date: l.Date }; }),
+    scores: rows_('Scores').map(function (r) { return { id: r.StudentID, course: r.Course, lesson: r.Lesson, score: r.Score }; }),
+    payments: rows_('Payments').filter(function (r) { return r.Status === 'Paid'; }).reverse().slice(0, 500)
+      .map(function (r) { return { name: names[r.UID] || r.UID, uid: r.UID, date: String(r.Date).slice(0, 10), amount: r.Amount, method: r.Method, ref: r.Ref }; }),
+    feedback: rows_('Feedback').reverse().slice(0, 200).map(function (f) {
+      return { fid: f.FID, name: names[f.UID] || f.UID, subject: f.Subject, message: f.Message, reply: f.Reply, date: f.Date };
+    })
+  };
+}
+
+function approve_(st, p) {
+  const out = lock_(function () {
+    const t = target_(p.uid);
+    if (!isVerified_(t)) throw userErr_('That person has not verified their email yet.');
+    if (t.Status === 'Approved') throw userErr_('Already approved.');
+    const id = nextId_(CFG.ID_PREFIX + '-' + new Date().getFullYear() + '-', 'ID_COUNTER', 4);
+    setCells_('Students', t._row, { Status: 'Approved', StudentID: id, ApprovedAt: now_() });
+    logAction_(st, 'Approve', t.UID, id);
+    return { id: id, name: t.Name, email: t.Email };
+  });
+  mail_(out.email, 'Application approved', ['Hello ' + clean1_(out.name) + ',', '', 'Your application has been approved. Welcome.',
+    'Your Student ID is ' + out.id + '. Keep it safe.', 'Sign in to see your lectures, notices and grades.']);
+  return out.id;
+}
+
+function deny_(st, p) {
+  const out = lock_(function () {
+    const t = target_(p.uid);
+    if (t.Status === 'Approved') throw userErr_('That student is already approved.');
+    setCells_('Students', t._row, { Status: 'Denied' });
+    logAction_(st, 'Decline', t.UID, '');
+    return { name: t.Name, email: t.Email };
+  });
+  mail_(out.email, 'Application update', ['Hello ' + clean1_(out.name) + ',', '',
+    "After review, we can't offer you a place at this time." + (CFG.SUPPORT_EMAIL ? ' Contact ' + CFG.SUPPORT_EMAIL + ' if you have questions.' : '')]);
+  return 'Declined';
+}
+
+function resendId_(st, p) {
+  const t = target_(p.uid);
+  if (t.Status !== 'Approved') throw userErr_('That student is not approved.');
+  mail_(t.Email, 'Your Student ID', ['Hello ' + clean1_(t.Name) + ',', '', 'Your Student ID is ' + t.StudentID + '.']);
+  logAction_(st, 'Resend ID', t.UID, '');
+  return 'ID sent to ' + t.Email;
+}
+
+function certificate_(st, p) {
+  const t = target_(p.uid);
+  if (t.Status !== 'Approved') throw userErr_('That student is not approved.');
+  const s = stats_(t.StudentID);
+  if (s.avg == null) throw userErr_('No quiz scores recorded for this student yet.');
+  if (s.avg < CFG.PASS_MARK) throw userErr_('Average is ' + s.avg + '%, below the ' + CFG.PASS_MARK + '% pass line.');
+  if (!isPaid_(t.UID)) throw userErr_('The graduation pack fee has not been paid.');
+  lock_(function () { setCells_('Students', t._row, { Certificate: today_() }); });
+  mail_(t.Email, 'Certificate pack', ['Hello ' + clean1_(t.Name) + ',', '', 'Congratulations. Your certificate pack has been issued. The office will contact you about collection.']);
+  logAction_(st, 'Issue certificate', t.UID, 'avg ' + s.avg);
+  return 'Certificate issued to ' + t.Name;
+}
+
+function saveScores_(st, p) {
+  const course = str_(p.course, 10).toUpperCase(), lesson = String(Math.floor(Number(p.lesson)));
+  if (!rows_('Lessons').some(function (l) { return l.Course === course && String(Number(l.Lesson)) === lesson; })) {
+    throw userErr_('Publish that lesson first.');
+  }
+  const list = Array.isArray(p.list) ? p.list.slice(0, 1500) : [];
+  const approved = {};
+  rows_('Students').forEach(function (r) { if (r.Status === 'Approved' && r.StudentID) approved[r.StudentID] = true; });
+  return lock_(function () {
+    const existing = rows_('Scores'), index = {};
+    existing.forEach(function (r, i) { index[r.StudentID + '|' + r.Course + '|' + String(Number(r.Lesson))] = i; });
+    const fresh = [];
+    let n = 0;
+    list.forEach(function (it) {
+      const id = str_(it && it.id, 40);
+      if (!approved[id] || it.score === '' || it.score == null) return;
+      const sc = Number(it.score);
+      if (!(sc >= 0 && sc <= 100)) throw userErr_('Scores must be between 0 and 100.');
+      const key = id + '|' + course + '|' + lesson;
+      if (index[key] != null) { existing[index[key]].Score = String(sc); existing[index[key]].Date = today_(); existing[index[key]].Source = 'manual'; }
+      else { fresh.push({ StudentID: id, Course: course, Lesson: lesson, Score: String(sc), Date: today_(), Source: 'manual' }); index[key] = existing.length + fresh.length - 1; }
+      n++;
+    });
+    const all = existing.concat(fresh).map(function (r) { return toArray_('Scores', r); });
+    if (all.length) sheet_('Scores').getRange(2, 1, all.length, SHEETS.Scores.length).setValues(all);
+    logAction_(st, 'Save scores', course + ' lesson ' + lesson, n + ' scores');
+    return n + ' score' + (n === 1 ? '' : 's') + ' saved for ' + course + ' lesson ' + lesson + '.';
+  });
+}
+
+function saveCourse_(st, p) {
+  const code = str_(p.code, 10).toUpperCase(), title = str_(p.title, 100), planned = Math.floor(Number(p.planned));
+  if (!/^[A-Z0-9-]{2,10}$/.test(code)) throw userErr_('Course code: 2 to 10 letters or numbers, for example BIB101.');
+  if (title.length < 2) throw userErr_('Enter the course title.');
+  if (!(planned >= CFG.MIN_LESSONS && planned <= 60)) throw userErr_('A course needs at least ' + CFG.MIN_LESSONS + ' lessons (and no more than 60).');
+  return lock_(function () {
+    const high = rows_('Lessons').filter(function (l) { return l.Course === code; })
+      .reduce(function (m, l) { return Math.max(m, Number(l.Lesson)); }, 0);
+    if (planned < high) throw userErr_('Lesson ' + high + ' is already published, so this course needs at least ' + high + ' lessons.');
+    const hit = findRow_('Courses', 'Code', code);
+    if (hit) setCells_('Courses', hit._row, { Title: title, Planned: planned });
+    else append_('Courses', { Code: code, Title: title, Planned: planned, Order: courseList_().length + 1 });
+    logAction_(st, 'Save course', code, title + ' (' + planned + ' lessons)');
+    return 'Course ' + code + ' saved.';
+  });
+}
+
+function saveLesson_(st, p) {
+  const code = str_(p.course, 10).toUpperCase(), lesson = Math.floor(Number(p.lesson));
+  const title = str_(p.title, 150), date = str_(p.date, 10), deadline = str_(p.deadline, 10);
+  const course = findRow_('Courses', 'Code', code);
+  if (!course) throw userErr_('Choose a course. Add the course first if it is new.');
+  const planned = Number(course.Planned) || CFG.MIN_LESSONS;
+  if (!(lesson >= 1 && lesson <= planned)) throw userErr_('Lesson number must be between 1 and ' + planned + ' for this course.');
+  if (title.length < 2) throw userErr_('Enter a title.');
+  if (!isoDate_(date)) throw userErr_('Choose the release date.');
+  if (deadline && !isoDate_(deadline)) throw userErr_('The graded quiz deadline is not a valid date.');
+  const formCheck = function (v, what) {
+    v = str_(v, 500);
+    if (v && !formId_(v)) throw userErr_(what + ': paste the form EDITOR link (it contains /forms/d/ and ends with /edit), not the link students use.');
+    return v;
+  };
+  const finalForm = formCheck(p.finalForm, 'Graded quiz');
+  const given = Array.isArray(p.parts) ? p.parts.slice(0, 3) : [];
+  const parts = [];
+  given.forEach(function (x, i) {
+    x = x || {};
+    const row = { Course: code, Lesson: lesson, Part: i + 1, Video: url_(x.video), Audio: url_(x.audio), Quiz: url_(x.quiz), Form: formCheck(x.form, 'Part ' + (i + 1)) };
+    if (row.Video || row.Audio || row.Quiz || row.Form) parts.push(row);
+  });
+  const row = { Course: code, Lesson: lesson, Title: title, Date: date, Handout: url_(p.handout), Deadline: deadline,
+                FinalQuiz: url_(p.finalQuiz), FinalForm: finalForm };
+  lock_(function () {
+    const hit = lessonFind_(code, lesson);
+    if (hit) sheet_('Lessons').getRange(hit._row, 1, 1, SHEETS.Lessons.length).setValues([toArray_('Lessons', row)]);
+    else append_('Lessons', row);
+    const sh = sheet_('Parts'), cols = SHEETS.Parts.length;
+    const keep = rows_('Parts').filter(function (r) { return !(r.Course === code && Number(r.Lesson) === lesson); })
+      .map(function (r) { return toArray_('Parts', r); });
+    const all = keep.concat(parts.map(function (r) { return toArray_('Parts', r); }));
+    if (sh.getLastRow() > 1) sh.getRange(2, 1, sh.getLastRow() - 1, cols).clearContent();
+    if (all.length) sh.getRange(2, 1, all.length, cols).setValues(all);
+    logAction_(st, 'Save lesson', code + ' lesson ' + lesson, title + ' (' + parts.length + ' parts)');
+  });
+  return 'Lesson ' + lesson + ' of ' + code + ' saved with ' + parts.length + ' part' + (parts.length === 1 ? '' : 's') + '.';
+}
+
+function notice_(st, p) {
+  const title = str_(p.title, 150), body = str_(p.body, 2000);
+  if (title.length < 2 || body.length < 2) throw userErr_('Enter a title and a message.');
+  lock_(function () { append_('Notices', { Date: today_(), Title: title, Body: body }); logAction_(st, 'Post notice', '', title); });
+  return 'Notice posted.';
+}
+
+function reply_(st, p) {
+  const text = str_(p.text, 1500);
+  if (text.length < 2) throw userErr_('Write a reply.');
+  const out = lock_(function () {
+    const f = findRow_('Feedback', 'FID', str_(p.fid, 40));
+    if (!f) throw userErr_('Message not found.');
+    if (f.Reply) throw userErr_('That message already has a reply.');
+    setCells_('Feedback', f._row, { Reply: text, ReplyDate: today_() });
+    logAction_(st, 'Reply', f.UID, f.FID);
+    return { uid: f.UID, subject: f.Subject };
+  });
+  const t = findRow_('Students', 'UID', out.uid);
+  if (t) mail_(t.Email, 'Reply from the office', ['Hello ' + clean1_(t.Name) + ',', '', 'About "' + clean1_(out.subject) + '":', '', clean1_(text)]);
+  return 'Reply sent.';
+}
+
+function recordPayment_(st, p) {
+  const amount = Math.round(Number(p.amount) * 100) / 100, method = str_(p.method, 30);
+  if (!(amount > 0) || amount > 100000000) throw userErr_('Enter an amount greater than 0.');
+  if (['Cash', 'Bank transfer', 'Other'].indexOf(method) < 0) throw userErr_('Choose how it was paid.');
+  const out = lock_(function () {
+    const t = target_(p.uid);
+    if (t.Status !== 'Approved') throw userErr_('That student is not approved.');
+    const ref = 'MAN-' + nextId_('', 'MAN_COUNTER', 6);
+    append_('Payments', { Ref: ref, Date: now_(), UID: t.UID, Amount: amount, Method: method, Status: 'Paid' });
+    logAction_(st, 'Record payment', t.UID, ref + ' ' + amount + ' ' + method);
+    return { name: t.Name, email: t.Email };
+  });
+  mail_(out.email, 'Payment received', ['Hello ' + clean1_(out.name) + ',', '', 'We recorded your payment of N' + amount.toLocaleString('en-US') + ' (' + method + '). Thank you.']);
+  return 'Payment recorded for ' + out.name + '.';
+}
+
+/* ------------------------------------------------------------- internals */
+
+function run_(fn) {
+  try { return { ok: true, data: fn() }; }
+  catch (e) {
+    if (e && e.user) return { ok: false, error: e.message, code: e.code || '' };
+    console.error(e && e.stack ? e.stack : e);
+    return { ok: false, error: 'Something went wrong. Try again in a moment.' };
+  }
+}
+
+function userErr_(message, code) { const e = new Error(message); e.user = true; e.code = code || ''; return e; }
+
+function newSession_(uid) {
+  const pwv = Number(PropertiesService.getScriptProperties().getProperty('PWV_' + uid) || 0);
+  const token = Utilities.getUuid() + Utilities.getUuid().replace(/-/g, '');
+  CacheService.getScriptCache().put('s_' + token, uid + '|' + Math.max(Date.now(), pwv + 1), CFG.SESSION_SECONDS);
+  return token;
+}
+
+// A session remembers who it belongs to and when it began. Changing or resetting a password records a time,
+// and every sign-in that began before it stops working.
+function session_(token) {
+  if (typeof token !== 'string' || token.length < 40) throw userErr_('Sign in to continue.', 'SESSION');
+  const cache = CacheService.getScriptCache(), v = cache.get('s_' + token);
+  if (!v) throw userErr_('Your session expired. Sign in again.', 'SESSION');
+  const parts = String(v).split('|'), uid = parts[0], created = Number(parts[1]) || 0;
+  const pwv = Number(PropertiesService.getScriptProperties().getProperty('PWV_' + uid) || 0);
+  if (!created || created <= pwv) { cache.remove('s_' + token); throw userErr_('Your session expired. Sign in again.', 'SESSION'); }
+  cache.put('s_' + token, v, CFG.SESSION_SECONDS); // sliding expiry
+  return uid;
+}
+
+function lock_(fn) { const l = LockService.getScriptLock(); l.waitLock(20000); try { return fn(); } finally { l.releaseLock(); } }
+function str_(v, max) { return String(v == null ? '' : v).trim().slice(0, max); }
+function now_() { return new Date().toISOString(); }
+function today_() { return Utilities.formatDate(new Date(), Session.getScriptTimeZone(), 'yyyy-MM-dd'); }
+function isoDate_(s) { return /^\d{4}-\d{2}-\d{2}$/.test(s) && !isNaN(Date.parse(s)); }
+function url_(u) { u = str_(u, 500); return /^https?:\/\/[^\s<>"']+$/i.test(u) ? u : ''; }
+function clean1_(v) { return String(v == null ? '' : v).replace(/[\r\n]+/g, ' ').trim(); }
+function hex_(b) { return b.map(function (x) { return ('0' + (x & 0xff).toString(16)).slice(-2); }).join(''); }
+
+function hash_(pw, salt) {
+  let h = salt + pw;
+  for (let i = 0; i < CFG.HASH_ROUNDS; i++) h = hex_(Utilities.computeDigest(Utilities.DigestAlgorithm.SHA_256, h + salt, Utilities.Charset.UTF_8));
+  return h;
+}
+
+function safeEq_(a, b) {
+  a = String(a); b = String(b);
+  if (a.length !== b.length) return false;
+  let r = 0;
+  for (let i = 0; i < a.length; i++) r |= a.charCodeAt(i) ^ b.charCodeAt(i);
+  return r === 0;
+}
+
+function sheet_(name) {
+  const id = PropertiesService.getScriptProperties().getProperty('SHEET_ID');
+  if (!id) throw new Error('Run setup() first.');
+  const sh = SpreadsheetApp.openById(id).getSheetByName(name);
+  if (!sh) throw new Error('Missing sheet: ' + name);
+  return sh;
+}
+
+function rows_(name) {
+  const v = sheet_(name).getDataRange().getValues(), head = v.shift();
+  return v.map(function (r, i) {
+    const o = { _row: i + 2 };
+    head.forEach(function (h, j) { o[h] = r[j] == null ? '' : String(r[j]); });
+    return o;
+  });
+}
+
+function findRow_(name, key, val) {
+  const want = String(val).toLowerCase(), all = rows_(name);
+  for (let i = 0; i < all.length; i++) if (String(all[i][key]).toLowerCase() === want) return all[i];
+  return null;
+}
+
+function byEmail_(email) {
+  const key = str_(email, 120).toLowerCase();
+  return key ? findRow_('Students', 'Email', key) : null;
+}
+
+function toArray_(name, obj) { return SHEETS[name].map(function (h) { return obj[h] == null ? '' : String(obj[h]); }); }
+function append_(name, obj) { const sh = sheet_(name); sh.getRange(sh.getLastRow() + 1, 1, 1, SHEETS[name].length).setValues([toArray_(name, obj)]); }
+
+function setCells_(name, row, obj) {
+  const sh = sheet_(name);
+  Object.keys(obj).forEach(function (k) { sh.getRange(row, SHEETS[name].indexOf(k) + 1).setValue(String(obj[k])); });
+}
+
+function nextId_(prefix, prop, pad) { // call only while holding lock_()
+  const props = PropertiesService.getScriptProperties();
+  const n = Number(props.getProperty(prop) || 0) + 1;
+  props.setProperty(prop, String(n));
+  return prefix + ('000000' + n).slice(-pad);
+}
+
+/* ------------------------------------------------- emailed codes and limits */
+
+// Accounts without a Verified value count as verified.
+function isVerified_(row) { return String(row.Verified == null ? '' : row.Verified).toLowerCase() !== 'no'; }
+
+/** Makes a 6 digit code and keeps only its hash for a limited time. purpose: 'v' sign-up, 'r' password reset. */
+function issueCode_(purpose, uid, seconds) {
+  const code = ('000000' + (parseInt(Utilities.getUuid().replace(/-/g, '').slice(0, 12), 16) % 1000000)).slice(-6);
+  const salt = Utilities.getUuid(), life = Math.min(seconds, 21600);
+  CacheService.getScriptCache().put('c_' + purpose + '_' + uid,
+    JSON.stringify({ h: hash_(code, salt), s: salt, t: 0, e: Date.now() + life * 1000 }), life);
+  return code;
+}
+
+/** Checks a code. Wrong guesses are counted and the code dies after MAX_CODE_TRIES. Throws badMsg on any failure. */
+function consumeCode_(purpose, uid, code, badMsg) {
+  const cache = CacheService.getScriptCache(), key = 'c_' + purpose + '_' + uid, raw = cache.get(key);
+  if (!raw) throw userErr_(badMsg);
+  const rec = JSON.parse(raw);
+  if (Date.now() > rec.e || rec.t >= CFG.MAX_CODE_TRIES) { cache.remove(key); throw userErr_(badMsg); }
+  code = str_(code, 10);
+  if (!/^[0-9]{6}$/.test(code) || !safeEq_(hash_(code, rec.s), rec.h)) {
+    rec.t += 1;
+    if (rec.t >= CFG.MAX_CODE_TRIES) cache.remove(key);
+    else cache.put(key, JSON.stringify(rec), Math.max(1, Math.floor((rec.e - Date.now()) / 1000)));
+    throw userErr_(badMsg);
+  }
+  cache.remove(key);
+}
+
+/** Allows `max` hits per key per `seconds`. The same limit applies whether or not the account exists. */
+function throttle_(prefix, key, max, seconds, msg) {
+  const cache = CacheService.getScriptCache(), k = prefix + key, n = Number(cache.get(k) || 0);
+  if (n >= max) throw userErr_(msg);
+  cache.put(k, String(n + 1), Math.min(seconds, 21600));
+}
+
+function budget_(prefix, limit) {
+  const props = PropertiesService.getScriptProperties();
+  const key = prefix + Utilities.formatDate(new Date(), Session.getScriptTimeZone(), 'yyyy-MM-dd');
+  const n = Number(props.getProperty(key) || 0) + 1;
+  props.setProperty(key, String(n));
+  return n <= limit;
+}
+function signupBudget_() { return budget_('SIGNUP_', CFG.MAX_SIGNUP_EMAILS_PER_DAY); }
+
+/* ------------------------------------------------------------------ email
+ * Sent from the account that deployed the web app (about 100 a day on free Gmail, 1,500 on Workspace).
+ * A failed email never blocks the action that triggered it. Emails never contain passwords.
+ */
+
+function appUrl_() { try { return CFG.PORTAL_URL || ScriptApp.getService().getUrl() || ''; } catch (e) { return ''; } }
+
+function mail_(to, subject, lines) {
+  try {
+    if (!CFG.EMAIL_ENABLED || !to || !/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(to)) return false;
+    if (MailApp.getRemainingDailyQuota() < 1) return false;
+    const url = appUrl_();
+    const opts = { to: to, subject: CFG.SCHOOL_NAME + ': ' + subject, name: CFG.SCHOOL_NAME,
+                   body: lines.concat(url ? ['', 'Open the portal: ' + url] : [], ['', CFG.SCHOOL_NAME]).join('\n') };
+    if (CFG.SUPPORT_EMAIL) opts.replyTo = CFG.SUPPORT_EMAIL;
+    MailApp.sendEmail(opts);
+    return true;
+  } catch (e) { console.error('Email failed: ' + (e && e.message)); return false; }
+}
+
+function staffMail_(subject, lines) { if (CFG.STAFF_EMAIL) mail_(CFG.STAFF_EMAIL, subject, lines); }
+
+/** Run once from the editor to approve email permission and check delivery. Sends one email to you. */
+function testEmail() {
+  const me = Session.getEffectiveUser().getEmail();
+  if (!me || Session.getActiveUser().getEmail() !== me) throw new Error('Run testEmail() from the Apps Script editor while signed in as the script owner.');
+  const cache = CacheService.getScriptCache();
+  if (cache.get('testmail')) throw new Error('Wait a minute before sending another test.');
+  cache.put('testmail', '1', 60);
+  Logger.log(mail_(me, 'Test email', ['This is a test from your school portal.', 'If you can read it, email is working.']) ? 'Test email sent to ' + me : 'Email was not sent. Check EMAIL_ENABLED and your daily quota.');
+}
+
+/** Optional: run from the editor (or a daily trigger) to delete sign-ups nobody verified within 7 days. */
+function purgeUnverified() {
+  const me = Session.getEffectiveUser().getEmail();
+  if (!me || Session.getActiveUser().getEmail() !== me) throw new Error('Run purgeUnverified() from the Apps Script editor or a time-driven trigger as the script owner.');
+  const cutoff = Date.now() - 7 * 24 * 3600 * 1000, sh = sheet_('Students');
+  const old = rows_('Students').filter(function (r) { return !isVerified_(r) && Date.parse(r.CreatedAt) < cutoff; });
+  old.sort(function (a, b) { return b._row - a._row; }).forEach(function (r) { sh.deleteRow(r._row); });
+  Logger.log('Removed ' + old.length + ' unverified sign-ups.');
+}

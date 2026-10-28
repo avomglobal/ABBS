@@ -1,0 +1,237 @@
+<!DOCTYPE html>
+<html lang="en"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta name="theme-color" content="#1B2A41">
+<title>Bible School Portal</title>
+<style>
+:root{--ink:#1B2A41;--teal:#0F766E;--gold:#B7791F;--bg:#F4F6F5;--card:#fff;--line:#D9E0DE;--mute:#5B6B68;--bad:#B42318;--r:12px}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--ink);font:16px/1.5 system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;padding-bottom:76px}
+header{background:var(--ink);color:#fff;padding:14px 16px;display:flex;justify-content:space-between;align-items:center;position:sticky;top:0;z-index:5}
+header b{font:600 18px Georgia,serif}
+header span{display:flex;gap:8px}
+header button{background:none;border:1px solid #5d6e87;color:#fff;border-radius:8px;padding:6px 10px;font-size:14px}
+main{max-width:640px;margin:0 auto;padding:16px}
+h2{font:600 22px Georgia,serif;margin:4px 0 12px}
+a{color:var(--teal)}
+.card{background:var(--card);border:1px solid var(--line);border-radius:var(--r);padding:14px;margin-bottom:12px}
+.big{font:700 44px Georgia,serif;line-height:1}
+.mute{color:var(--mute);font-size:14px}
+label{display:block;font-size:14px;font-weight:600;margin:10px 0 4px}
+input,select,textarea{width:100%;padding:12px;border:1px solid var(--line);border-radius:10px;font:inherit;background:#fff;color:var(--ink)}
+textarea{min-height:90px}
+input[type=checkbox]{width:auto;margin-right:8px}
+button.p,a.b{display:inline-block;background:var(--teal);color:#fff;border:0;border-radius:10px;padding:12px 16px;font:600 15px inherit;text-decoration:none;margin:8px 8px 0 0}
+button.g,a.g{background:#fff;color:var(--ink);border:1px solid var(--line)}
+button.d{background:var(--bad)}
+button:disabled{opacity:.5}
+.tabs{display:flex;gap:8px;margin-bottom:12px}
+.tabs button{flex:1;padding:10px;border:1px solid var(--line);background:#fff;border-radius:10px;font:600 15px inherit}
+.tabs .on{background:var(--ink);color:#fff;border-color:var(--ink)}
+nav{position:fixed;bottom:0;left:0;right:0;background:#fff;border-top:1px solid var(--line);display:flex;padding-bottom:env(safe-area-inset-bottom)}
+nav button{flex:1;border:0;background:none;padding:14px 2px;font:600 13px inherit;color:var(--mute)}
+nav .on{color:var(--teal);box-shadow:inset 0 3px var(--teal)}
+.tag{display:inline-block;padding:2px 8px;border-radius:99px;font-size:12px;font-weight:600;background:#E6F2F0;color:var(--teal)}
+.tag.w{background:#FBEFD9;color:var(--gold)}.tag.x{background:#FBE4E1;color:var(--bad)}
+table{width:100%;border-collapse:collapse;font-size:14px}
+td,th{text-align:left;padding:8px 4px;border-bottom:1px solid var(--line)}
+.row{display:flex;justify-content:space-between;gap:8px;align-items:center}
+.sc{width:80px}
+header .brandbox{display:flex;align-items:center;gap:10px;min-width:0}
+.logo{height:34px;width:auto;border-radius:6px;background:#fff;padding:2px}
+.hero-logo{display:block;max-height:90px;max-width:70%;margin:4px auto 14px}
+.part{border-top:1px solid var(--line);margin-top:12px;padding-top:10px}
+details{border-top:1px solid var(--line);padding:8px 0}
+summary{cursor:pointer}
+#toast{position:fixed;left:16px;right:16px;bottom:88px;background:var(--ink);color:#fff;padding:12px;border-radius:10px;opacity:0;pointer-events:none;transition:opacity .2s;text-align:center}
+#toast.on{opacity:1}
+</style></head><body>
+<header><div class="brandbox"><img id="logo" class="logo" alt="" hidden><b id="brand"></b></div><span><button id="acct" hidden>Account</button><button id="out" hidden>Sign out</button></span></header>
+<main id="v"></main><nav id="nav" hidden></nav><div id="toast" role="status"></div>
+<script src="https://js.paystack.co/v1/inline.js"></script>
+<script>
+/* ============ SETTINGS ============ */
+const CONFIG={
+  apiUrl:"",                       // paste your Apps Script web app link here (it ends in /exec)
+  school:"Adullam Bible School",
+  logo:"logo.png"                  // your logo file, uploaded next to index.html (PNG, JPG or SVG). Use "" for no logo
+};
+
+let T='',ROLE='',H={},D={},tab='',PEND=null,RMAIL='';
+try{T=sessionStorage.getItem('abs_t')||''}catch(e){}
+const saveT=t=>{T=t;try{t?sessionStorage.setItem('abs_t',t):sessionStorage.removeItem('abs_t')}catch(e){}};
+const $=s=>document.querySelector(s);
+const esc=s=>String(s==null?'':s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+const val=id=>$('#'+id).value.trim();
+const url=u=>/^https?:\/\//.test(u)?esc(u):'';
+const naira=n=>'₦'+Number(n).toLocaleString();
+const empty=m=>`<div class="card mute">${m}</div>`;
+function toast(m){const t=$('#toast');t.textContent=m;t.className='on';setTimeout(()=>t.className='',3500)}
+function fail(e){if(e&&e.code==='SESSION'){saveT('');auth('in','Your session expired. Sign in again.')}else toast((e&&e.message)||String(e))}
+async function run(b,fn){b.disabled=true;try{await fn()}catch(e){fail(e)}b.disabled=false}
+$('#brand').textContent=CONFIG.school;
+const logo=$('#logo');
+if(CONFIG.logo){logo.src=CONFIG.logo;logo.onload=()=>logo.hidden=false;logo.onerror=()=>logo.hidden=true}
+
+/* Calls your Apps Script web app. The body is plain text so the browser needs no CORS pre-check. */
+async function call(a,p){
+  if(!CONFIG.apiUrl)throw new Error('The portal is not connected yet. Paste your Apps Script link into apiUrl at the top of index.html.');
+  const ctl=new AbortController(),tm=setTimeout(()=>ctl.abort(),60000);let r;
+  try{
+    const res=await fetch(CONFIG.apiUrl,{method:'POST',headers:{'Content-Type':'text/plain;charset=utf-8'},body:JSON.stringify({a,t:T,p:p||{}}),redirect:'follow',signal:ctl.signal});
+    r=await res.json();
+  }catch(e){throw new Error("Can't reach the server. Check your connection and try again.")}
+  finally{clearTimeout(tm)}
+  if(!r||typeof r!=='object')throw new Error('No response from the server.');
+  if(!r.ok)throw Object.assign(new Error(r.error||'Something went wrong.'),{code:r.code});
+  return r.data;
+}
+
+/* ---------- sign in, apply, verify, reset ---------- */
+function auth(m,msg){
+  $('#nav').hidden=true;$('#out').hidden=true;$('#acct').hidden=true;$('#v').onclick=null;
+  const em=PEND?esc(PEND.email):'';
+  const body={
+    in:`<label>Email</label><input id="e" type="email" autocomplete="username"><label>Password</label><input id="p" type="password" autocomplete="current-password"><button class="p" id="go">Sign in</button><p><a href="#" id="l1">Forgot your password?</a></p>`,
+    up:`<label>Full name</label><input id="n" autocomplete="name"><label>Email</label><input id="e" type="email" autocomplete="email"><label>WhatsApp number</label><input id="ph" type="tel"><label>Church / ministry</label><input id="ch"><label>Short testimony of your call</label><textarea id="t"></textarea><label>Choose a password (at least 8 characters)</label><input id="p" type="password" autocomplete="new-password"><label>Confirm password</label><input id="p2" type="password" autocomplete="new-password"><label><input type="checkbox" id="cv">I covenant to keep Christian character on this campus and understand a processing fee applies only in Month 5 for the graduation certificate pack.</label><button class="p" id="go">Submit application</button><p class="mute">We will email a 6-digit code to confirm your address.</p>`,
+    verify:`<p>We emailed a 6-digit code to confirm your address. Enter it to finish your application.</p><label>Email</label><input id="e" type="email" value="${em}"><label>6-digit code</label><input id="c" inputmode="numeric" autocomplete="one-time-code" maxlength="6"><button class="p" id="go">Verify email</button><button class="p g" id="rs">Send a new code</button>`,
+    req:`<p>Enter your email. If an account matches, we will email you a 6-digit code.</p><label>Email</label><input id="e" type="email"><button class="p" id="go">Email me a code</button>`,
+    reset:`<p>Check your email for the code. It works for 30 minutes.</p><label>6-digit code</label><input id="c" inputmode="numeric" autocomplete="one-time-code" maxlength="6"><label>New password</label><input id="p" type="password" autocomplete="new-password"><label>Confirm new password</label><input id="p2" type="password" autocomplete="new-password"><button class="p" id="go">Set new password</button>`
+  };
+  const head=(m=='in'||m=='up')
+    ?`<h2>Welcome</h2><div class="tabs"><button class="${m=='in'?'on':''}" onclick="auth('in')">Sign in</button><button class="${m=='up'?'on':''}" onclick="auth('up')">Apply</button></div>`
+    :`<h2>${{verify:'Verify your email',req:'Reset your password',reset:'Choose a new password'}[m]}</h2>`;
+  const big=CONFIG.logo?`<img class="hero-logo" src="${esc(CONFIG.logo)}" alt="${esc(CONFIG.school)}" onerror="this.remove()">`:'';
+  $('#v').innerHTML=big+head+(msg?`<div class="card mute">${esc(msg)}</div>`:'')+`<div class="card">${body[m]}</div>`+((m=='in'||m=='up')?'':'<p><a href="#" id="bk">Back to sign in</a></p>');
+  const link=(id,f)=>{const x=$(id);if(x)x.onclick=ev=>{ev.preventDefault();f()}};
+  link('#bk',()=>auth('in'));link('#l1',()=>auth('req'));
+  const rs=$('#rs');if(rs)rs.onclick=e=>run(e.target,async()=>{await call('resendCode',{email:val('e')});toast('If that address is waiting for verification, we sent a new code.')});
+  const same=()=>{if($('#p').value!==$('#p2').value)throw new Error("The passwords don't match.")};
+  const H_={
+    in:async()=>{const email=val('e'),pw=$('#p').value;
+      try{saveT((await call('login',{email,password:pw})).token)}
+      catch(e){if(e.code=='VERIFY'){PEND={email,pw};auth('verify');toast(e.message);return}throw e}
+      await start()},
+    up:async()=>{same();const email=val('e'),pw=$('#p').value;
+      const r=await call('register',{name:val('n'),email,phone:val('ph'),church:val('ch'),testimony:val('t'),password:pw,covenant:$('#cv').checked});
+      if(r.verify){PEND={email,pw};auth('verify');toast(r.emailed?'We emailed you a 6-digit code.':'Verification emails are busy. Tap Send a new code in a little while.')}
+      else auth('in','Application received. You can sign in once we approve it.')},
+    verify:async()=>{const email=val('e');await call('verifyEmail',{email,code:val('c')});
+      const pw=PEND&&PEND.email==email?PEND.pw:'';PEND=null;
+      if(pw){try{saveT((await call('login',{email,password:pw})).token);await start();return}catch(e){}}
+      auth('in','Email verified. Sign in to see your application status.')},
+    req:async()=>{const email=val('e');await call('requestReset',{email});RMAIL=email;auth('reset');toast("If an account matches, we've emailed a code.")},
+    reset:async()=>{same();await call('resetPassword',{email:RMAIL,code:val('c'),password:$('#p').value});auth('in','Password changed. Sign in with your new password.')}
+  };
+  $('#go').onclick=e=>run(e.target,H_[m]);
+}
+
+const TABS={Student:['Home','Lessons','Grades','Fee','Guide','Help'],Waiting:['Home','Help'],Admin:['Review','Students','Scores','Money','Inbox','Post']};
+async function start(){
+  H=await call('home');ROLE=H.role;
+  $('#out').hidden=false;$('#acct').hidden=false;
+  const tabs=ROLE=='Admin'?TABS.Admin:H.status=='Approved'?TABS.Student:TABS.Waiting;
+  const n=$('#nav');n.hidden=false;n.innerHTML=tabs.map(t=>`<button data-t="${t}">${t}</button>`).join('');
+  n.onclick=e=>e.target.dataset.t&&go(e.target.dataset.t);
+  go(tabs[0]);
+}
+async function go(t){
+  tab=t;document.querySelectorAll('nav button').forEach(b=>b.className=b.dataset.t==t?'on':'');
+  $('#v').innerHTML='<p class="mute">Loading…</p>';$('#v').onclick=null;
+  try{
+    if(ROLE=='Admin')D=await call('admin');
+    else{const f={Home:'home',Fee:'home',Lessons:'lessons',Grades:'scores',Help:'mine'}[t];D=f?await call(f):{};if(f=='home')H=D}
+    VIEW[t]();
+  }catch(e){fail(e)}
+}
+$('#out').onclick=()=>{call('logout').catch(()=>{});saveT('');ROLE='';H={};auth('in')};
+$('#acct').onclick=async()=>{
+  document.querySelectorAll('nav button').forEach(b=>b.className='');$('#v').onclick=null;
+  try{H=await call('home');VIEW.Account()}catch(e){fail(e)}
+};
+
+const VIEW={
+/* ---------- account ---------- */
+Account(){const h=H;
+ $('#v').innerHTML=`<h2>My account</h2><div class="card"><b>${esc(h.name)}</b><div class="mute">${esc(h.email)}${h.id?' · '+esc(h.id):''}</div></div>
+ <div class="card"><label>WhatsApp number</label><input id="ph" type="tel" value="${esc(h.phone)}"><label>Church / ministry</label><input id="ch" value="${esc(h.church)}"><label>Next of kin: name</label><input id="kn" value="${esc(h.kinName)}"><label>Next of kin: relationship</label><input id="kr" value="${esc(h.kinRel)}"><label>Next of kin: phone</label><input id="kp" type="tel" value="${esc(h.kinPhone)}"><button class="p" id="sp">Save profile</button></div>
+ <div class="card"><b>Change password</b><label>Current password</label><input id="o" type="password" autocomplete="current-password"><label>New password</label><input id="n1" type="password" autocomplete="new-password"><label>Confirm new password</label><input id="n2" type="password" autocomplete="new-password"><button class="p" id="cp">Change password</button><p class="mute">This signs you out on your other devices.</p></div>`;
+ $('#sp').onclick=e=>run(e.target,async()=>toast(await call('saveProfile',{phone:val('ph'),church:val('ch'),kinName:val('kn'),kinRel:val('kr'),kinPhone:val('kp')})));
+ $('#cp').onclick=e=>run(e.target,async()=>{if($('#n1').value!==$('#n2').value)throw new Error("The new passwords don't match.");
+  const r=await call('changePassword',{old:$('#o').value,new:$('#n1').value});saveT(r.token);$('#o').value=$('#n1').value=$('#n2').value='';toast('Password changed. Other devices were signed out.')})},
+/* ---------- student ---------- */
+Home(){const d=D;
+ if(d.status!='Approved'){const no=d.status=='Denied';
+  $('#v').innerHTML=`<h2>${esc(d.name)}</h2><div class="card"><span class="tag ${no?'x':'w'}">${no?'Not accepted':'Application under review'}</span><p>${no?'We are not able to offer you a place at this time.':'Thank you for applying. We will email you as soon as your application has been reviewed. You can message the office from the Help tab.'}</p></div>`;return}
+ const ok=d.avg==null||d.avg>=d.passMark;
+ $('#v').innerHTML=`<h2>${esc(d.name)}</h2><div class="card"><div class="mute">Student ID ${esc(d.id)}</div><div class="big">${d.avg==null?'-':d.avg+'%'}</div><span class="tag ${ok?'':'x'}">${d.avg==null?'No quizzes yet':ok?'Above the '+d.passMark+'% pass line':'Below the '+d.passMark+'% pass line'}</span><p class="mute">${d.quizzes} quiz${d.quizzes==1?'':'zes'} recorded</p>${d.courses.map(c=>`<div class="row mute"><span>${esc(c.title)}</span><b>${c.avg}%</b></div>`).join('')}</div><h2>Notices</h2>`+(d.notices.length?d.notices.map(n=>`<div class="card"><b>${esc(n.title)}</b><div class="mute">${esc(n.date)}</div><p>${esc(n.body)}</p></div>`).join(''):empty('No notices yet.'))},
+Lessons(){const cs=D.courses;
+ const L=(href,txt,cls)=>url(href)?`<a class="b ${cls||''}" href="${url(href)}" target="_blank" rel="noopener">${txt}</a>`:'';
+ const chk=(c,l,it,txt)=>`<button class="p g" data-chk="${it}" data-c="${esc(c)}" data-l="${esc(l)}">${txt}</button>`;
+ const tag=(st,sc)=>st=='done'?`<span class="tag">Done${sc==null?'':' · '+sc+'%'}</span>`:st=='open'?'<span class="tag w">Open</span>':st=='closed'?'<span class="tag x">Closed</span>':'<span class="tag w">Locked</span>';
+ const part=(c,l,p)=>`<div class="part"><div class="row"><b>Part ${p.part}</b>${tag(p.state,p.score)}</div>${p.state=='locked'?'<p class="mute">Finish the quiz of the part before to unlock this one.</p>':L(p.video,'Watch')+L(p.audio,'Audio','g')+L(p.quiz,'Practice quiz','g')+(p.hasQuiz?chk(c,l.lesson,'P'+p.part,p.state=='done'?'Check again':'I finished, check it'):'')}</div>`;
+ const fin=(c,l)=>{const f=l.final;if(!f)return'';return`<div class="part"><div class="row"><b>Graded quiz</b>${tag(f.state,f.score)}</div>`+
+  (f.state=='locked'?'<p class="mute">Finish all the parts to unlock the graded quiz.</p>':f.state=='closed'?`<p class="mute">This quiz closed on ${esc(f.deadline)}.</p>`:f.state=='done'?'<p class="mute">Your score counts toward your average.</p>':L(f.quiz,'Take graded quiz')+(f.deadline?`<p class="mute">Closes ${esc(f.deadline)}</p>`:'')+(f.hasForm?chk(c,l.lesson,'FINAL','I finished, check it'):''))+'</div>'};
+ $('#v').innerHTML='<h2>Lessons</h2>'+(cs.length?cs.map(c=>`<h2 style="font-size:18px;margin-top:18px">${esc(c.title)}</h2><div class="mute" style="margin-bottom:8px">${esc(c.code)} · ${c.released} of ${c.planned} lessons released</div>`+c.lessons.map(l=>`<div class="card"><b>Lesson ${esc(l.lesson)}: ${esc(l.title)}</b><div class="mute">Released ${esc(l.date)}</div>${L(l.handout,'Handout','g')}${l.parts.map(p=>part(c.code,l,p)).join('')}${fin(c.code,l)}</div>`).join('')).join(''):empty('The first lesson has not been published yet.'));
+ $('#v').onclick=e=>{const b=e.target.closest('[data-chk]');if(b)run(b,async()=>{await call('checkPart',{course:b.dataset.c,lesson:b.dataset.l,item:b.dataset.chk});toast('Quiz recorded.');go('Lessons')})}},
+Grades(){const d=D;
+ $('#v').innerHTML='<h2>Grades</h2>'+(d.courses.length?`<div class="card"><div class="mute">Overall average</div><div class="big">${d.avg}%</div><span class="tag ${d.avg>=d.passMark?'':'x'}">${d.avg>=d.passMark?'Above':'Below'} the ${d.passMark}% pass line</span></div>`+d.courses.map(c=>`<div class="card"><div class="row"><b>${esc(c.title)}</b><b>${c.avg}%</b></div><table><tr><th>Lesson</th><th>Score</th><th>Recorded</th></tr>${c.scores.map(s=>`<tr><td>${esc(s.lesson)}</td><td>${esc(s.score)}%</td><td>${esc(s.date)}</td></tr>`).join('')}</table></div>`).join(''):empty('No scores recorded yet.'))},
+Fee(){const d=D;
+ $('#v').innerHTML=`<h2>Graduation pack fee</h2><div class="card"><div class="big">${naira(d.fee)}</div><p class="mute">Payable once, in Month 5, for your certificate pack. Card, bank transfer and USSD are supported.</p>${d.paid?'<span class="tag">Paid. Thank you.</span>':'<button class="p" id="pay">Pay now</button>'+(d.payRef?'<button class="p g" id="chk">Check payment</button>':'')}</div>`;
+ if(d.paid)return;
+ $('#pay').onclick=e=>run(e.target,async()=>{
+  if(!window.PaystackPop)throw new Error('The payment window could not load. Check your connection and try again.');
+  const i=await call('payInit');
+  PaystackPop.setup({key:i.key,email:i.email,amount:i.amount*100,currency:'NGN',ref:i.ref,
+   callback:r=>{call('payVerify',{ref:r.reference}).then(()=>{toast('Payment confirmed.');go('Fee')}).catch(fail)},onClose(){}}).openIframe()});
+ if(d.payRef)$('#chk').onclick=e=>run(e.target,async()=>{await call('payVerify',{ref:d.payRef});toast('Payment confirmed.');go('Fee')})},
+Guide(){const c=(t,b)=>`<div class="card"><b>${t}</b><p>${b}</p></div>`;
+ $('#v').innerHTML='<h2>Orientation guide</h2>'+
+ c('Key dates','Classes open Tuesday 1 December 2026 with orientation. The first lessons are released from Monday 7 December 2026 at 6:00 AM, then new lessons are released every week. Each lesson shows its own release date.')+
+ c('Each week','You follow two courses at the same time, with two lessons in each course every week. Each lesson has three parts of about 15 minutes. Watch a part, take its short 5-question practice quiz, then tap I finished, check it to unlock the next part. After Part 3, take the graded lesson quiz, which counts toward your average and closes on the deadline shown, with no extensions. Always type your Student ID in every quiz.')+
+ c('Passing','Keep your overall average, across all quizzes in all your courses, at 60% or above. Check it on the Home tab or the Grades tab.')+
+ c('Saving data','Set Facebook video quality to 360p or 480p. Download the lesson over Wi-Fi or a night bundle (11 PM to 6 AM), or use the audio version from the Lessons tab.')+
+ c('Fee','A processing fee applies only in Month 5 for your graduation certificate pack. Pay it from the Fee tab.')+
+ c('Need help?','Use the Help tab. The office replies by email.')},
+Help(){$('#v').innerHTML=`<h2>Contact the office</h2><div class="card"><label>Topic</label><select id="sj"><option>Lost Student ID</option><option>Cannot watch video</option><option>Quiz problem</option><option>Payment</option><option>General</option></select><label>Message</label><textarea id="m"></textarea><button class="p" id="s">Send message</button></div>`+D.map(f=>`<div class="card"><b>${esc(f.subject)}</b><p>${esc(f.message)}</p>${f.reply?`<p><span class="tag">Office reply</span><br>${esc(f.reply)}</p>`:'<span class="tag w">Awaiting reply</span>'}</div>`).join('');
+ $('#s').onclick=e=>run(e.target,async()=>{toast(await call('send',{subject:val('sj'),message:val('m')}));go('Help')})},
+/* ---------- staff ---------- */
+Review(){const p=D.students.filter(s=>s.status=='Pending'&&!s.admin);
+ $('#v').innerHTML=`<h2>Applications (${p.length})</h2>`+(p.length?p.map(s=>`<div class="card"><b>${esc(s.name)}</b><div class="mute">${esc(s.email)} · ${esc(s.phone)}<br>${esc(s.church)}</div><p>${esc(s.testimony)}</p><button class="p" data-a="approve" data-u="${esc(s.uid)}">Approve</button><button class="p d" data-a="deny" data-u="${esc(s.uid)}">Decline</button></div>`).join(''):empty('No pending applications.'));
+ $('#v').onclick=e=>{const b=e.target;if(b.dataset.a)run(b,async()=>{const r=await call(b.dataset.a,{uid:b.dataset.u});toast(b.dataset.a=='approve'?'Approved as '+r:r);go('Review')})}},
+Students(){
+ const draw=q=>{$('#list').innerHTML=D.students.filter(s=>(s.name+s.id+s.email).toLowerCase().includes(q.toLowerCase())).map(s=>{
+  const m=D.scores.filter(x=>x.id==s.id&&s.id),av=m.length?Math.round(m.reduce((a,b)=>a+Number(b.score),0)/m.length):null,pd=D.payments.some(x=>x.uid==s.uid),ok=s.status=='Approved',
+  wa='https://wa.me/'+String(s.phone).replace(/\D/g,'').replace(/^0/,'234');
+  return`<div class="card"><div class="row"><div><b>${esc(s.name)}</b><div class="mute">${esc(s.id||'No ID yet')} · ${esc(s.email)}</div></div><span class="tag ${ok?'':s.status=='Denied'?'x':'w'}">${esc(s.status)}</span></div>${ok?`<p class="mute">Average ${av==null?'-':av+'%'} · Fee ${pd?'paid':'unpaid'}${s.certificate?' · Certificate '+esc(s.certificate):''}</p><a class="b g" href="${esc(wa)}" target="_blank" rel="noopener">WhatsApp</a><button class="p g" data-a="resendId" data-u="${esc(s.uid)}">Resend ID</button><button class="p" data-a="certificate" data-u="${esc(s.uid)}">Issue certificate</button>`:''}</div>`}).join('')||empty('No students match.')};
+ $('#v').innerHTML=`<h2>Students</h2><input id="q" placeholder="Search name, ID or email"><div id="list" style="margin-top:12px"></div>`;draw('');$('#q').oninput=e=>draw(e.target.value);
+ $('#v').onclick=e=>{const b=e.target;if(b.dataset.a)run(b,async()=>{toast(await call(b.dataset.a,{uid:b.dataset.u}));if(b.dataset.a=='certificate')go('Students')})}},
+Scores(){const st=D.students.filter(s=>s.status=='Approved');
+ $('#v').innerHTML=`<h2>Record quiz scores</h2><div class="card"><label>Course</label><select id="co">${D.courses.map(c=>`<option value="${esc(c.code)}">${esc(c.code)}: ${esc(c.title)}</option>`).join('')}</select><label>Lesson</label><select id="ls"></select><button class="p g" id="im">Import from Google Forms</button><div id="imres"></div><p class="mute">Or type the graded quiz scores by hand below. Scores you type are never overwritten by an import.</p><div id="sl"></div><button class="p" id="sv">Save scores</button></div>`;
+ const fill=()=>{const c=val('co'),l=$('#ls').value;
+  $('#sl').innerHTML=!l?'<p class="mute">Publish a lesson for this course first (Post tab).</p>':(st.map(s=>{const m=D.scores.find(x=>x.id==s.id&&x.course==c&&String(x.lesson)==l);return`<div class="row" style="margin-top:8px"><span>${esc(s.name)}<br><span class="mute">${esc(s.id)}</span></span><input class="sc" type="number" min="0" max="100" data-id="${esc(s.id)}" value="${m?esc(m.score):''}"></div>`}).join('')||'<p class="mute">No approved students yet.</p>')};
+ const fillL=()=>{const ls=D.lessons.filter(l=>l.course==val('co')).sort((a,b)=>a.lesson-b.lesson);$('#ls').innerHTML=ls.map(l=>`<option value="${esc(l.lesson)}">Lesson ${esc(l.lesson)}: ${esc(l.title)}</option>`).join('');fill()};
+ if(D.courses.length){fillL();$('#co').onchange=fillL;$('#ls').onchange=fill}else $('#sl').innerHTML='<p class="mute">Add a course and publish lessons first (Post tab).</p>';
+ $('#im').onclick=e=>run(e.target,async()=>{const r=await call('importScores',{course:val('co'),lesson:$('#ls').value});$('#imres').innerHTML='<div class="card mute">'+r.lines.map(esc).join('<br>')+'</div>';D=await call('admin');fill()});
+ $('#sv').onclick=e=>run(e.target,async()=>{toast(await call('saveScores',{course:val('co'),lesson:$('#ls').value,list:[...document.querySelectorAll('.sc')].map(i=>({id:i.dataset.id,score:i.value}))}));go('Scores')})},
+Money(){const t=D.payments.reduce((a,b)=>a+Number(b.amount),0),st=D.students.filter(s=>s.status=='Approved');
+ $('#v').innerHTML=`<h2>Payments</h2><div class="card"><div class="big">${naira(t)}</div><div class="mute">${D.payments.length} confirmed payment${D.payments.length==1?'':'s'}</div></div>`+(D.payments.length?`<div class="card"><table>${D.payments.map(p=>`<tr><td>${esc(p.name)}<br><span class="mute">${esc(p.date)} · ${esc(p.method)}</span></td><td>${naira(p.amount)}</td></tr>`).join('')}</table></div>`:'')+
+ `<h2>Record a payment</h2><div class="card"><p class="mute">For fees paid in cash or by bank transfer.</p><label>Student</label><select id="ps">${st.map(s=>`<option value="${esc(s.uid)}">${esc(s.name)} (${esc(s.id)})</option>`).join('')}</select><label>Amount (₦)</label><input id="pa" type="number" min="1" value="${esc(D.fee)}"><label>Paid by</label><select id="pm"><option>Cash</option><option>Bank transfer</option><option>Other</option></select><button class="p" id="pr">Record payment</button></div>`;
+ $('#pr').onclick=e=>run(e.target,async()=>{toast(await call('recordPayment',{uid:val('ps'),amount:val('pa'),method:val('pm')}));go('Money')})},
+Inbox(){$('#v').innerHTML='<h2>Student messages</h2>'+(D.feedback.length?D.feedback.map(f=>`<div class="card"><b>${esc(f.subject)}</b><div class="mute">${esc(f.name)} · ${esc(f.date)}</div><p>${esc(f.message)}</p>${f.reply?`<span class="tag">Replied</span> ${esc(f.reply)}`:`<textarea id="r${esc(f.fid)}" placeholder="Write a reply"></textarea><button class="p" data-f="${esc(f.fid)}">Send reply</button>`}</div>`).join(''):empty('No messages.'));
+ $('#v').onclick=e=>{const f=e.target.dataset.f;if(f)run(e.target,async()=>{toast(await call('reply',{fid:f,text:val('r'+f)}));go('Inbox')})}},
+Post(){$('#v').innerHTML=`<h2>Add or update a course</h2><div class="card"><label>Course code (for example BIB101)</label><input id="cc"><label>Course title</label><input id="ct"><label>Number of lessons (at least 10)</label><input id="cn" type="number" min="10" max="60" value="10"><button class="p" id="sc">Save course</button></div>
+ <h2>Publish a lesson</h2><div class="card">${D.courses.length?`<p class="mute">Each lesson has three parts of about 15 minutes, each with a 5-question practice quiz, then one graded quiz. In every Google Form add a short-answer question called <b>Student ID</b> and turn on Quiz mode. For the "editor link", open the form and copy the address that ends in <b>/edit</b>.</p><label>Course</label><select id="lc">${D.courses.map(c=>`<option value="${esc(c.code)}">${esc(c.code)}: ${esc(c.title)} (${esc(c.planned)} lessons)</option>`).join('')}</select><label>Lesson number</label><input id="w" type="number" min="1"><button class="p g" id="ll">Load saved lesson</button><label>Title</label><input id="ti"><label>Release date</label><input id="dt" type="date"><label>Handout link (PDF)</label><input id="hd">${[1,2,3].map(n=>`<details ${n==1?'open':''}><summary><b>Part ${n}</b> (about 15 minutes)</summary><label>Video link (Facebook/YouTube)</label><input id="v${n}"><label>Audio link (MP3)</label><input id="a${n}"><label>Practice quiz link (the link students use)</label><input id="q${n}"><label>Practice quiz form: editor link</label><input id="f${n}"></details>`).join('')}<details><summary><b>Graded quiz</b> (counts toward the average)</summary><label>Quiz link (the link students use)</label><input id="fq"><label>Quiz form: editor link</label><input id="ff"><label>Quiz deadline</label><input id="dl" type="date"></details><button class="p" id="pl">Publish lesson</button>`:'<p class="mute">Add a course first.</p>'}</div>
+ <h2>Post a notice</h2><div class="card"><label>Title</label><input id="nt"><label>Message</label><textarea id="nb"></textarea><button class="p" id="pn">Post notice</button></div>`;
+ $('#sc').onclick=e=>run(e.target,async()=>{toast(await call('saveCourse',{code:val('cc'),title:val('ct'),planned:val('cn')}));go('Post')});
+ if($('#pl')){
+  $('#ll').onclick=e=>run(e.target,async()=>{const i=await call('lessonInfo',{course:val('lc'),lesson:val('w')});
+   if(!i){toast('No saved lesson with that number yet. Fill in the form to create it.');return}
+   $('#ti').value=i.title;$('#dt').value=i.date;$('#hd').value=i.handout;$('#dl').value=i.deadline;$('#fq').value=i.finalQuiz;$('#ff').value=i.finalForm;
+   i.parts.forEach((p,k)=>{const n=k+1;$('#v'+n).value=p.video;$('#a'+n).value=p.audio;$('#q'+n).value=p.quiz;$('#f'+n).value=p.form});toast('Loaded. Change what you need, then publish again.')});
+  $('#pl').onclick=e=>run(e.target,async()=>{toast(await call('saveLesson',{course:val('lc'),lesson:val('w'),title:val('ti'),date:val('dt'),handout:val('hd'),deadline:val('dl'),finalQuiz:val('fq'),finalForm:val('ff'),parts:[1,2,3].map(n=>({video:val('v'+n),audio:val('a'+n),quiz:val('q'+n),form:val('f'+n)}))}))})}
+ $('#pn').onclick=e=>run(e.target,async()=>{toast(await call('notice',{title:val('nt'),body:val('nb')}));$('#nt').value=$('#nb').value=''})}
+};
+
+if(T)start().catch(e=>{saveT('');auth('in',e&&e.code==='SESSION'?'':e&&e.message)});else auth('in');
+</script></body></html>
